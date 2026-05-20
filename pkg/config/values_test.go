@@ -149,6 +149,25 @@ func TestValues_mergeExtraFrom_ScrubEnvKeys(t *testing.T) {
 	})
 }
 
+func TestValuesLoader_Load_InspectorGate(t *testing.T) {
+	tmpDir := t.TempDir()
+	globalConfig := filepath.Join(tmpDir, "config")
+
+	configContent := `
+inspector_gate_enabled = true
+max_task_attempts = 5
+`
+	require.NoError(t, os.WriteFile(globalConfig, []byte(configContent), 0o600))
+
+	loader := newValuesLoader(defaultsFS)
+	values, err := loader.Load("", globalConfig)
+	require.NoError(t, err)
+
+	assert.True(t, values.InspectorGateEnabled)
+	assert.True(t, values.InspectorGateEnabledSet)
+	assert.Equal(t, 5, values.MaxTaskAttempts)
+}
+
 func TestValuesLoader_Load_LocalOverridesGlobal(t *testing.T) {
 	tmpDir := t.TempDir()
 	globalConfig := filepath.Join(tmpDir, "global-config")

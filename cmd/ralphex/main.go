@@ -50,6 +50,7 @@ type opts struct {
 	IdleTimeout             time.Duration `long:"idle-timeout" description:"kill claude session after no output for this duration (e.g. 5m, 10m)"`
 	SkipFinalize            bool          `long:"skip-finalize" description:"skip finalize step even if enabled in config"`
 	PreserveAnthropicAPIKey bool          `long:"preserve-anthropic-api-key" description:"pass ANTHROPIC_API_KEY through to claude (for users authenticating Claude Code via API key rather than OAuth/keychain)"`
+	InspectorGate           bool          `long:"inspector-gate" description:"gate each task on a separately-credentialed inspector verdict instead of trusting the worker's self-completion"`
 	Worktree                bool          `long:"worktree" description:"run in isolated git worktree"`
 	Branch                  string        `long:"branch" description:"override branch name for worktree/branch creation (default: derived from plan filename)"`
 	PlanDescription         string        `long:"plan" description:"create plan interactively (enter plan description)"`
@@ -925,6 +926,8 @@ func createRunner(req executePlanRequest, o opts, log processor.Logger, holder *
 		DefaultBranch:         req.BaseRef,
 		TaskModel:             taskModel,
 		ReviewModel:           reviewModel,
+		InspectorGateEnabled:  req.Config.InspectorGateEnabled || o.InspectorGate,
+		MaxTaskAttempts:       req.Config.MaxTaskAttempts,
 		AppConfig:             req.Config,
 	}, log, holder)
 	if req.GitSvc != nil {
