@@ -11,6 +11,10 @@ const (
 	Question   = "<<<RALPHEX:QUESTION>>>"
 	PlanReady  = "<<<RALPHEX:PLAN_READY>>>"
 	PlanDraft  = "<<<RALPHEX:PLAN_DRAFT>>>"
+	// PeasantTired is emitted by a worker proposing it has finished the current task. It is only
+	// a proposal: acceptance requires a separately-credentialed inspector verdict the worker
+	// cannot produce, so emitting this never self-certifies completion.
+	PeasantTired = "<<<RALPHEX:PEASANT_IS_TIRED>>>"
 )
 
 // Phase represents execution phase for color coding.

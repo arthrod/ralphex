@@ -13,14 +13,20 @@ import (
 // signal constants are aliases to the shared status package for convenience within processor.
 // all signal values are defined in pkg/status to avoid circular dependencies.
 const (
-	SignalCompleted  = status.Completed
-	SignalFailed     = status.Failed
-	SignalReviewDone = status.ReviewDone
-	SignalCodexDone  = status.CodexDone
-	SignalQuestion   = status.Question
-	SignalPlanReady  = status.PlanReady
-	SignalPlanDraft  = status.PlanDraft
+	SignalCompleted    = status.Completed
+	SignalFailed       = status.Failed
+	SignalReviewDone   = status.ReviewDone
+	SignalCodexDone    = status.CodexDone
+	SignalQuestion     = status.Question
+	SignalPlanReady    = status.PlanReady
+	SignalPlanDraft    = status.PlanDraft
+	SignalPeasantTired = status.PeasantTired
 )
+
+// isPeasantTired returns true if signal indicates the worker proposed completion of the current task.
+func isPeasantTired(signal string) bool {
+	return signal == SignalPeasantTired
+}
 
 // questionSignalRe matches the QUESTION signal block with JSON payload
 var questionSignalRe = regexp.MustCompile(`<<<RALPHEX:QUESTION>>>\s*([\s\S]*?)\s*<<<RALPHEX:END>>>`)
