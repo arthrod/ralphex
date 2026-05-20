@@ -12,6 +12,7 @@ import (
 
 	"github.com/umputun/ralphex/pkg/config"
 	"github.com/umputun/ralphex/pkg/executor"
+	"github.com/umputun/ralphex/pkg/inspector"
 	"github.com/umputun/ralphex/pkg/plan"
 	"github.com/umputun/ralphex/pkg/status"
 )
@@ -59,6 +60,8 @@ type Config struct {
 	ExternalReviewToolSet bool           // when true, AppConfig.ExternalReviewTool is an explicit choice that overrides legacy codex_enabled=false back-compat
 	FinalizeEnabled       bool           // whether finalize step is enabled
 	DefaultBranch         string         // default branch name (detected from repo)
+	InspectorGateEnabled  bool           // when true, task phase uses the per-task credential-gated inspector loop
+	MaxTaskAttempts       int            // reject threshold before escalating a task to the oracle (0 = default)
 	AppConfig             *config.Config // full application config (for executors and prompts)
 }
 
@@ -94,6 +97,7 @@ type InputCollector interface {
 type GitChecker interface {
 	HeadHash() (string, error)
 	DiffFingerprint() (string, error)
+	Diff(fromRef, toRef string) (string, error)
 }
 
 // Executors groups the executor dependencies for the Runner.
@@ -122,6 +126,12 @@ type Runner struct {
 	pauseHandler        func(ctx context.Context) bool  // called on break during task phase; true = resume, false = abort
 	lastSessionTimedOut bool                            // set by runWithSessionTimeout, checked by review loops
 	taskPhaseOverride   func(ctx context.Context) error // test seam: override runTaskPhase result (nil = normal execution)
+
+	// inspector gate (per-task credential-gated completion check); inactive unless enabled in config.
+	inspectorGateEnabled bool
+	reviewer             inspector.Reviewer // external-review tool adapted as the inspector engine
+	maxTaskAttempts      int                // reject threshold before escalating to the oracle
+	inspectorStateDB     string             // sqlite path for per-task state (empty = default under .ralphex/)
 }
 
 // New creates a new Runner with the given configuration and shared phase holder.
@@ -251,17 +261,30 @@ func NewWithExecutors(cfg Config, log Logger, execs Executors, holder *status.Ph
 		reviewClaude = execs.Claude
 	}
 
+	// inspector gate: adapt the configured external-review tool (custom preferred, else codex) as
+	// the inspector engine — a different family from the Claude worker, per design.
+	var reviewer inspector.Reviewer
+	switch {
+	case execs.Custom != nil:
+		reviewer = executorReviewer{exec: execs.Custom}
+	case execs.Codex != nil:
+		reviewer = executorReviewer{exec: execs.Codex}
+	}
+
 	return &Runner{
-		cfg:            cfg,
-		log:            log,
-		claude:         execs.Claude,
-		reviewClaude:   reviewClaude,
-		codex:          execs.Codex,
-		custom:         execs.Custom,
-		phaseHolder:    holder,
-		iterationDelay: iterDelay,
-		taskRetryCount: retryCount,
-		waitOnLimit:    waitOnLimit,
+		cfg:                  cfg,
+		log:                  log,
+		claude:               execs.Claude,
+		reviewClaude:         reviewClaude,
+		codex:                execs.Codex,
+		custom:               execs.Custom,
+		phaseHolder:          holder,
+		iterationDelay:       iterDelay,
+		taskRetryCount:       retryCount,
+		waitOnLimit:          waitOnLimit,
+		inspectorGateEnabled: cfg.InspectorGateEnabled,
+		reviewer:             reviewer,
+		maxTaskAttempts:      cfg.MaxTaskAttempts,
 	}
 }
 
@@ -456,6 +479,9 @@ func (r *Runner) runTasksOnly(ctx context.Context) error {
 func (r *Runner) runTaskPhase(ctx context.Context) error {
 	if r.taskPhaseOverride != nil {
 		return r.taskPhaseOverride(ctx)
+	}
+	if r.inspectorGateEnabled {
+		return r.runTaskPhaseGated(ctx)
 	}
 	prompt := r.replacePromptVariables(r.cfg.AppConfig.TaskPrompt)
 	retryCount := 0

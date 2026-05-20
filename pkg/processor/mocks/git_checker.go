@@ -13,6 +13,9 @@ import (
 //
 //		// make and configure a mocked processor.GitChecker
 //		mockedGitChecker := &GitCheckerMock{
+//			DiffFunc: func(fromRef string, toRef string) (string, error) {
+//				panic("mock out the Diff method")
+//			},
 //			DiffFingerprintFunc: func() (string, error) {
 //				panic("mock out the DiffFingerprint method")
 //			},
@@ -26,6 +29,9 @@ import (
 //
 //	}
 type GitCheckerMock struct {
+	// DiffFunc mocks the Diff method.
+	DiffFunc func(fromRef string, toRef string) (string, error)
+
 	// DiffFingerprintFunc mocks the DiffFingerprint method.
 	DiffFingerprintFunc func() (string, error)
 
@@ -34,6 +40,13 @@ type GitCheckerMock struct {
 
 	// calls tracks calls to the methods.
 	calls struct {
+		// Diff holds details about calls to the Diff method.
+		Diff []struct {
+			// FromRef is the fromRef argument value.
+			FromRef string
+			// ToRef is the toRef argument value.
+			ToRef string
+		}
 		// DiffFingerprint holds details about calls to the DiffFingerprint method.
 		DiffFingerprint []struct {
 		}
@@ -41,8 +54,45 @@ type GitCheckerMock struct {
 		HeadHash []struct {
 		}
 	}
+	lockDiff            sync.RWMutex
 	lockDiffFingerprint sync.RWMutex
 	lockHeadHash        sync.RWMutex
+}
+
+// Diff calls DiffFunc.
+func (mock *GitCheckerMock) Diff(fromRef string, toRef string) (string, error) {
+	if mock.DiffFunc == nil {
+		panic("GitCheckerMock.DiffFunc: method is nil but GitChecker.Diff was just called")
+	}
+	callInfo := struct {
+		FromRef string
+		ToRef   string
+	}{
+		FromRef: fromRef,
+		ToRef:   toRef,
+	}
+	mock.lockDiff.Lock()
+	mock.calls.Diff = append(mock.calls.Diff, callInfo)
+	mock.lockDiff.Unlock()
+	return mock.DiffFunc(fromRef, toRef)
+}
+
+// DiffCalls gets all the calls that were made to Diff.
+// Check the length with:
+//
+//	len(mockedGitChecker.DiffCalls())
+func (mock *GitCheckerMock) DiffCalls() []struct {
+	FromRef string
+	ToRef   string
+} {
+	var calls []struct {
+		FromRef string
+		ToRef   string
+	}
+	mock.lockDiff.RLock()
+	calls = mock.calls.Diff
+	mock.lockDiff.RUnlock()
+	return calls
 }
 
 // DiffFingerprint calls DiffFingerprintFunc.
