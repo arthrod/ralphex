@@ -91,6 +91,9 @@ type Config struct {
 	ClaudeErrorPatterns []string `json:"claude_error_patterns"`
 	CodexErrorPatterns  []string `json:"codex_error_patterns"`
 
+	// additional env var names to strip from the claude child process (e.g. inspector/oracle credentials)
+	ScrubEnvKeys []string `json:"scrub_env_keys"`
+
 	// limit patterns for wait+retry behavior (overlap with error patterns is intentional)
 	ClaudeLimitPatterns []string      `json:"claude_limit_patterns"`
 	CodexLimitPatterns  []string      `json:"codex_limit_patterns"`
@@ -317,6 +320,7 @@ func loadConfigFromDirs(globalDir, localDir string) (*Config, error) {
 		WatchDirs:               values.WatchDirs,
 		ClaudeErrorPatterns:     values.ClaudeErrorPatterns,
 		CodexErrorPatterns:      values.CodexErrorPatterns,
+		ScrubEnvKeys:            values.ScrubEnvKeys,
 		ClaudeLimitPatterns:     values.ClaudeLimitPatterns,
 		CodexLimitPatterns:      values.CodexLimitPatterns,
 		WaitOnLimit:             values.WaitOnLimit,

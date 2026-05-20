@@ -63,6 +63,7 @@ type CommandRunner interface {
 type execClaudeRunner struct {
 	stdin          io.Reader
 	preserveAPIKey bool
+	scrubKeys      []string // additional env var names to strip from the child env
 }
 
 func (r *execClaudeRunner) Run(ctx context.Context, name string, args ...string) (io.Reader, func() error, error) {
@@ -79,7 +80,7 @@ func (r *execClaudeRunner) Run(ctx context.Context, name string, args ...string)
 	// ANTHROPIC_API_KEY by default so a host-set key cannot silently override OAuth/keychain
 	// auth and bill a different account. preserveAPIKey opts into keeping the key for users
 	// who authenticate Claude Code via API key.
-	cmd.Env = claudeChildEnv(os.Environ(), r.preserveAPIKey)
+	cmd.Env = claudeChildEnv(os.Environ(), r.preserveAPIKey, r.scrubKeys...)
 
 	// pass prompt via stdin when set (avoids Windows 8191-char command-line limit)
 	if r.stdin != nil {
@@ -183,12 +184,14 @@ func stripFlag(args []string, flag string) []string {
 // claudeChildEnv builds the environment for a child claude process. CLAUDECODE is always
 // stripped to prevent nested-session errors. ANTHROPIC_API_KEY is stripped unless
 // preserveAPIKey is true; preserving it is required for users who authenticate Claude Code
-// via API key rather than OAuth/keychain.
-func claudeChildEnv(env []string, preserveAPIKey bool) []string {
-	if preserveAPIKey {
-		return filterEnv(env, "CLAUDECODE")
+// via API key rather than OAuth/keychain. scrubKeys lists additional env var names to strip
+// from the child (e.g. inspector/oracle credentials the worker must not be able to read).
+func claudeChildEnv(env []string, preserveAPIKey bool, scrubKeys ...string) []string {
+	remove := append([]string{"CLAUDECODE"}, scrubKeys...)
+	if !preserveAPIKey {
+		remove = append(remove, "ANTHROPIC_API_KEY")
 	}
-	return filterEnv(env, "ANTHROPIC_API_KEY", "CLAUDECODE")
+	return filterEnv(env, remove...)
 }
 
 // filterEnv returns a copy of env with specified keys removed.
@@ -242,6 +245,7 @@ type ClaudeExecutor struct {
 	LimitPatterns  []string          // patterns to detect rate limits (checked before error patterns)
 	IdleTimeout    time.Duration     // kill session after this duration of no output, zero = disabled
 	PreserveAPIKey bool              // when true, ANTHROPIC_API_KEY is passed through to the child; default false strips it
+	ScrubEnvKeys   []string          // additional env var names to strip from the child (e.g. inspector/oracle credentials)
 	cmdRunner      CommandRunner     // for testing, nil uses default
 }
 
@@ -288,7 +292,7 @@ func (e *ClaudeExecutor) Run(ctx context.Context, prompt string) Result {
 	if e.cmdRunner != nil {
 		runner = e.cmdRunner
 	} else {
-		runner = &execClaudeRunner{stdin: stdinReader, preserveAPIKey: e.PreserveAPIKey}
+		runner = &execClaudeRunner{stdin: stdinReader, preserveAPIKey: e.PreserveAPIKey, scrubKeys: e.ScrubEnvKeys}
 	}
 
 	// set up idle timeout: derive a cancellable context that fires when no output

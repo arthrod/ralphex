@@ -110,6 +110,14 @@ external_review_tool = codex
 # default: false
 # preserve_anthropic_api_key = false
 
+# scrub_env_keys: comma-separated list of additional environment variable names
+# to strip from the child claude process. use this to keep credentials that the
+# parent ralphex process holds (e.g. inspector/approval tokens) out of reach of
+# the claude worker it spawns. CLAUDECODE is always stripped regardless; this
+# option is for extra, caller-defined secrets.
+# default: empty (nothing extra stripped)
+# scrub_env_keys = MY_INSPECTOR_TOKEN,MY_ORACLE_TOKEN
+
 # ------------------------------------------------------------------------------
 # plan move behavior
 # ------------------------------------------------------------------------------

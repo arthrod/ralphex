@@ -101,6 +101,22 @@ iteration_delay_ms = 5000
 	assert.Equal(t, "docs/plans", values.PlansDir)
 }
 
+func TestValuesLoader_Load_ScrubEnvKeys(t *testing.T) {
+	tmpDir := t.TempDir()
+	globalConfig := filepath.Join(tmpDir, "config")
+
+	configContent := `
+scrub_env_keys = UGABUGA_INSPECTOR_TOKEN, FOO_SECRET
+`
+	require.NoError(t, os.WriteFile(globalConfig, []byte(configContent), 0o600))
+
+	loader := newValuesLoader(defaultsFS)
+	values, err := loader.Load("", globalConfig)
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"UGABUGA_INSPECTOR_TOKEN", "FOO_SECRET"}, values.ScrubEnvKeys)
+}
+
 func TestValuesLoader_Load_LocalOverridesGlobal(t *testing.T) {
 	tmpDir := t.TempDir()
 	globalConfig := filepath.Join(tmpDir, "global-config")
