@@ -40,6 +40,7 @@ type backend interface {
 	commitFiles(msg string, paths ...string) error
 	createInitialCommit(msg string) error
 	diffStats(baseBranch string) (DiffStats, error)
+	diff(fromRef, toRef string) (string, error)
 	addWorktree(path, branch string, createBranch bool) error
 	removeWorktree(path string) error
 	pruneWorktrees() error
@@ -578,6 +579,13 @@ func (s *Service) EnsureHasCommits(promptFn func() bool) error {
 // returns zero stats if baseBranch doesn't exist or HEAD equals baseBranch.
 func (s *Service) DiffStats(baseBranch string) (DiffStats, error) {
 	return s.repo.diffStats(baseBranch)
+}
+
+// Diff returns the textual diff between two refs (fromRef..toRef). Used by the inspector to
+// review exactly what a worker changed for a task, by diffing the HEAD captured before the
+// worker ran against the HEAD it left behind.
+func (s *Service) Diff(fromRef, toRef string) (string, error) {
+	return s.repo.diff(fromRef, toRef)
 }
 
 // EnsureLocalGitignore creates .ralphex/.gitignore with patterns for runtime artifacts
