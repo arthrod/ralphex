@@ -2,12 +2,12 @@ package processor
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 
 	"github.com/umputun/ralphex/pkg/inspector"
+	"github.com/umputun/ralphex/pkg/oracle"
 	"github.com/umputun/ralphex/pkg/plan"
 	"github.com/umputun/ralphex/pkg/state"
 	"github.com/umputun/ralphex/pkg/status"
@@ -15,10 +15,6 @@ import (
 
 // defaultMaxTaskAttempts is the reject threshold after which a task escalates to the oracle.
 const defaultMaxTaskAttempts = 3
-
-// errOracleNeeded is returned by the gated task loop when a task escalates (3 rejects or an update
-// verdict) and no oracle is wired yet. Patch 3 replaces this with an oracle invocation.
-var errOracleNeeded = errors.New("task escalated to oracle (not yet implemented)")
 
 // executorReviewer adapts an Executor to inspector.Reviewer so the configured external-review tool
 // (codex/custom) can serve as the inspector engine.
@@ -100,7 +96,14 @@ func (r *Runner) runTaskPhaseGated(ctx context.Context) error {
 
 		if outcome.escalate {
 			r.log.Print("task %d escalated to oracle after %d attempt(s)", taskNum, outcome.state.AttemptCount)
-			return errOracleNeeded
+			resumed, oerr := r.runOracle(ctx, taskNum, store)
+			if oerr != nil {
+				return oerr
+			}
+			if !resumed {
+				return ErrUserAborted
+			}
+			// oracle applied an approved fix and reset the task to pending: loop re-runs it.
 		}
 		// accepted or rejected-under-threshold: loop continues (next task, or retry with yelling).
 	}
@@ -178,6 +181,85 @@ func buildGatedTaskPrompt() string {
 		"- If a previous attempt left an 'INSPECTOR REJECTION' note in the task, address it specifically.\n" +
 		"- When you have committed your work for this one task, output exactly:\n" +
 		status.PeasantTired + "\n"
+}
+
+// runOracle resolves an escalated task: it proposes a substitution via the external tool, asks the
+// user to approve it, and on approval applies it to the plan and resets the task to pending so the
+// loop retries it. Returns resumed=false when the user declines (the run should abort).
+func (r *Runner) runOracle(ctx context.Context, taskNum int, store *state.Store) (resumed bool, err error) {
+	exec := r.externalExecutor()
+	if exec == nil {
+		return false, fmt.Errorf("oracle requires an external review tool (codex/custom) but none is configured")
+	}
+	if r.inputCollector == nil {
+		return false, fmt.Errorf("oracle requires interactive input but no input collector is set")
+	}
+
+	planContent, err := os.ReadFile(r.resolvePlanFilePath())
+	if err != nil {
+		return false, fmt.Errorf("read plan for oracle: %w", err)
+	}
+
+	out, err := oracle.Resolve(ctx, executorProposer{exec: exec}, inputApprover{ic: r.inputCollector, ctx: ctx},
+		string(planContent), r.planTaskTitle(taskNum), "rejected repeatedly by the inspector")
+	if err != nil {
+		return false, fmt.Errorf("oracle: %w", err)
+	}
+	if !out.Applied {
+		r.log.Print("oracle proposal declined; aborting run")
+		return false, nil
+	}
+
+	if err := os.WriteFile(r.resolvePlanFilePath(), []byte(out.Plan), 0o600); err != nil {
+		return false, fmt.Errorf("write plan after oracle: %w", err)
+	}
+	st, err := store.Get(taskNum)
+	if err != nil {
+		return false, fmt.Errorf("read task %d state after oracle: %w", taskNum, err)
+	}
+	st.AttemptCount = 0
+	st.Status = state.StatusPending
+	if err := store.Save(st); err != nil {
+		return false, fmt.Errorf("reset task %d state after oracle: %w", taskNum, err)
+	}
+	r.log.Print("oracle fix applied to task %d; retrying", taskNum)
+	return true, nil
+}
+
+// externalExecutor returns the configured external tool (custom preferred, else codex) used as the
+// inspector and oracle engine, or nil if none is configured.
+func (r *Runner) externalExecutor() Executor {
+	if r.custom != nil {
+		return r.custom
+	}
+	return r.codex
+}
+
+// executorProposer adapts an Executor to oracle.Proposer.
+type executorProposer struct{ exec Executor }
+
+func (p executorProposer) Propose(ctx context.Context, prompt string) (string, error) {
+	res := p.exec.Run(ctx, prompt)
+	if res.Error != nil {
+		return "", res.Error
+	}
+	return res.Output, nil
+}
+
+// inputApprover adapts the runner's InputCollector to oracle.Approver, presenting the proposed
+// substitution as a Yes/No question.
+type inputApprover struct {
+	ic  InputCollector
+	ctx context.Context //nolint:containedctx // short-lived per-resolve adapter; Approver has no ctx param
+}
+
+func (a inputApprover) Approve(oldStr, newStr string) (bool, error) {
+	q := fmt.Sprintf("Oracle proposes a fix to the task spec:\n  OLD: %s\n  NEW: %s\nApply this change?", oldStr, newStr)
+	ans, err := a.ic.AskQuestion(a.ctx, q, []string{"Yes", "No"})
+	if err != nil {
+		return false, err
+	}
+	return ans == "Yes", nil
 }
 
 // buildInspectorPrompt builds the verdict prompt sent to the external inspector tool.

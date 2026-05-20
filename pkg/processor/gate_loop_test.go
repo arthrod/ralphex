@@ -12,6 +12,7 @@ import (
 	"github.com/umputun/ralphex/pkg/config"
 	"github.com/umputun/ralphex/pkg/executor"
 	"github.com/umputun/ralphex/pkg/processor/mocks"
+	"github.com/umputun/ralphex/pkg/state"
 	"github.com/umputun/ralphex/pkg/status"
 )
 
@@ -88,16 +89,50 @@ func TestRunTaskPhaseGated_DoneAcceptsAndCompletes(t *testing.T) {
 	assert.Contains(t, string(got), "- [x] implement", "parent should check the box on done verdict")
 }
 
-func TestRunTaskPhaseGated_RepeatedRejectEscalatesToOracle(t *testing.T) {
+func TestRunTaskPhaseGated_RepeatedRejectEscalatesAndOracleDeclineAborts(t *testing.T) {
 	r, planPath := newGatedRunner(t, oneTaskPlan, "VERDICT: reject | FIX THE THING")
+	// give the runner an oracle engine and a user that declines the proposed fix.
+	r.codex = &mocks.ExecutorMock{RunFunc: func(_ context.Context, _ string) executor.Result {
+		return executor.Result{Output: "OLD: implement\nNEW: build it"}
+	}}
+	r.inputCollector = &mocks.InputCollectorMock{
+		AskQuestionFunc: func(_ context.Context, _ string, _ []string) (string, error) { return "No", nil },
+	}
 
 	err := r.runTaskPhaseGated(context.Background())
-	require.ErrorIs(t, err, errOracleNeeded, "3 rejects should escalate to the oracle")
+	require.ErrorIs(t, err, ErrUserAborted, "3 rejects escalate; declining the oracle aborts the run")
 
 	got, err := os.ReadFile(planPath)
 	require.NoError(t, err)
 	assert.Contains(t, string(got), "FIX THE THING", "rejection should be yelled into the plan")
 	assert.Contains(t, string(got), "- [ ] implement", "box must stay unchecked on reject")
+}
+
+func TestRunOracle_ApprovedAppliesFixAndResetsState(t *testing.T) {
+	r, planPath := newGatedRunner(t, oneTaskPlan, "VERDICT: done") // verdict unused here
+	r.codex = &mocks.ExecutorMock{RunFunc: func(_ context.Context, _ string) executor.Result {
+		return executor.Result{Output: "OLD: implement\nNEW: build the thing"}
+	}}
+	r.inputCollector = &mocks.InputCollectorMock{
+		AskQuestionFunc: func(_ context.Context, _ string, _ []string) (string, error) { return "Yes", nil },
+	}
+	store, err := r.openStateStore()
+	require.NoError(t, err)
+	defer func() { _ = store.Close() }()
+	require.NoError(t, store.Save(state.TaskState{Position: 1, Status: state.StatusNeedsRevision, AttemptCount: 3}))
+
+	resumed, err := r.runOracle(context.Background(), 1, store)
+	require.NoError(t, err)
+	assert.True(t, resumed, "approved oracle fix resumes the loop")
+
+	got, err := os.ReadFile(planPath)
+	require.NoError(t, err)
+	assert.Contains(t, string(got), "build the thing", "approved substitution applied to plan")
+
+	st, err := store.Get(1)
+	require.NoError(t, err)
+	assert.Equal(t, state.StatusPending, st.Status, "task reset to pending after oracle")
+	assert.Equal(t, 0, st.AttemptCount, "attempts reset after oracle")
 }
 
 func TestRunTaskPhaseGated_WorkerNeverTired_StopsAtMaxIterations(t *testing.T) {
