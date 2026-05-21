@@ -22,7 +22,7 @@ func AppendYelling(content string, taskNumber, attempt int, payload string) (str
 		if ft.skip(line) {
 			continue
 		}
-		if m := taskHeaderPattern.FindStringSubmatch(line); m != nil && parseTaskNum(m[1]) == taskNumber {
+		if m := taskHeaderPattern.FindStringSubmatch(line); len(m) != 0 && parseTaskNum(m[1]) == taskNumber {
 			hdr = i
 			break
 		}

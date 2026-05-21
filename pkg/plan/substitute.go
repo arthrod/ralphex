@@ -1,6 +1,7 @@
 package plan
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -11,7 +12,7 @@ import (
 // silently accepted as a fix.
 func ApplySubstitution(content, old, replacement string) (string, error) {
 	if old == "" {
-		return "", fmt.Errorf("substitution OLD string is empty")
+		return "", errors.New("substitution OLD string is empty")
 	}
 	if !strings.Contains(content, old) {
 		return "", fmt.Errorf("substitution OLD string not found in plan: %q", old)

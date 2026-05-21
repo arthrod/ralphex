@@ -5,6 +5,7 @@
 package state
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -52,7 +53,7 @@ func Open(path string) (*Store, error) {
 	// single connection: keeps an in-memory db alive for the store's lifetime and serializes
 	// writes (sqlite is single-writer regardless), avoiding SQLITE_BUSY under this low-volume load.
 	db.SetMaxOpenConns(1)
-	if _, err := db.Exec(schema); err != nil {
+	if _, err := db.ExecContext(context.Background(), schema); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("create schema: %w", err)
 	}
@@ -60,7 +61,12 @@ func Open(path string) (*Store, error) {
 }
 
 // Close releases the underlying database handle.
-func (s *Store) Close() error { return s.db.Close() }
+func (s *Store) Close() error {
+	if err := s.db.Close(); err != nil {
+		return fmt.Errorf("close state store: %w", err)
+	}
+	return nil
+}
 
 // Get returns the state for the task at position. A task that has never been saved is reported
 // as pending with zero attempts, so callers can treat "absent" and "fresh" uniformly.
@@ -70,7 +76,7 @@ func (s *Store) Get(position int) (TaskState, error) {
 		attempts   int
 		lastCommit string
 	)
-	err := s.db.QueryRow(
+	err := s.db.QueryRowContext(context.Background(),
 		`SELECT status, attempt_count, last_commit FROM tasks WHERE position = ?`, position,
 	).Scan(&status, &attempts, &lastCommit)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -84,7 +90,7 @@ func (s *Store) Get(position int) (TaskState, error) {
 
 // Save upserts the full state for a task, keyed by position.
 func (s *Store) Save(ts TaskState) error {
-	_, err := s.db.Exec(
+	_, err := s.db.ExecContext(context.Background(),
 		`INSERT INTO tasks (position, status, attempt_count, last_commit)
 		 VALUES (?, ?, ?, ?)
 		 ON CONFLICT(position) DO UPDATE SET

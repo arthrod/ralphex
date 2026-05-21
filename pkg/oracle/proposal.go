@@ -4,7 +4,7 @@
 package oracle
 
 import (
-	"fmt"
+	"errors"
 	"regexp"
 	"strings"
 )
@@ -21,15 +21,15 @@ var (
 func parseProposal(output string) (oldStr, newStr string, err error) {
 	oldMatch := oldLineRe.FindStringSubmatch(output)
 	if oldMatch == nil {
-		return "", "", fmt.Errorf("no OLD: line found in oracle proposal")
+		return "", "", errors.New("no OLD: line found in oracle proposal")
 	}
 	newMatch := newLineRe.FindStringSubmatch(output)
 	if newMatch == nil {
-		return "", "", fmt.Errorf("no NEW: line found in oracle proposal")
+		return "", "", errors.New("no NEW: line found in oracle proposal")
 	}
 	oldStr = strings.TrimSpace(oldMatch[1])
 	if oldStr == "" {
-		return "", "", fmt.Errorf("oracle proposal has an empty OLD string")
+		return "", "", errors.New("oracle proposal has an empty OLD string")
 	}
 	return oldStr, strings.TrimSpace(newMatch[1]), nil
 }
