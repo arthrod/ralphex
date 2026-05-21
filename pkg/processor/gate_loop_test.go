@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -84,7 +85,7 @@ func TestRunTaskPhaseGated_DoneAcceptsAndCompletes(t *testing.T) {
 	err := r.runTaskPhaseGated(context.Background())
 	require.NoError(t, err)
 
-	got, err := os.ReadFile(planPath)
+	got, err := os.ReadFile(planPath) //nolint:gosec // test plan path from t.TempDir
 	require.NoError(t, err)
 	assert.Contains(t, string(got), "- [x] implement", "parent should check the box on done verdict")
 }
@@ -102,7 +103,7 @@ func TestRunTaskPhaseGated_RepeatedRejectEscalatesAndOracleDeclineAborts(t *test
 	err := r.runTaskPhaseGated(context.Background())
 	require.ErrorIs(t, err, ErrUserAborted, "3 rejects escalate; declining the oracle aborts the run")
 
-	got, err := os.ReadFile(planPath)
+	got, err := os.ReadFile(planPath) //nolint:gosec // test plan path from t.TempDir
 	require.NoError(t, err)
 	assert.Contains(t, string(got), "FIX THE THING", "rejection should be yelled into the plan")
 	assert.Contains(t, string(got), "- [ ] implement", "box must stay unchecked on reject")
@@ -125,7 +126,7 @@ func TestRunOracle_ApprovedAppliesFixAndResetsState(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, resumed, "approved oracle fix resumes the loop")
 
-	got, err := os.ReadFile(planPath)
+	got, err := os.ReadFile(planPath) //nolint:gosec // test plan path from t.TempDir
 	require.NoError(t, err)
 	assert.Contains(t, string(got), "build the thing", "approved substitution applied to plan")
 
@@ -133,6 +134,86 @@ func TestRunOracle_ApprovedAppliesFixAndResetsState(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, state.StatusPending, st.Status, "task reset to pending after oracle")
 	assert.Equal(t, 0, st.AttemptCount, "attempts reset after oracle")
+}
+
+func TestRunTaskPhaseGated_PreTickedBoxesDoNotBypassInspection(t *testing.T) {
+	// a worker that ignores the "don't tick checkboxes" instruction and ticks them itself must not
+	// be able to skip inspection: selection and the all-done decision come from the store, not the
+	// plan's checkboxes. here the plan arrives fully pre-ticked but the store is empty.
+	dir := t.TempDir()
+	planPath := filepath.Join(dir, "plan.md")
+	preTicked := "# Plan\n\n### Task 1: Do it\n\n- [x] implement\n"
+	require.NoError(t, os.WriteFile(planPath, []byte(preTicked), 0o600))
+
+	var workerCalls int
+	worker := &mocks.ExecutorMock{
+		RunFunc: func(_ context.Context, _ string) executor.Result {
+			workerCalls++
+			return executor.Result{Signal: status.PeasantTired, Output: "done one task"}
+		},
+	}
+	gitMock := &mocks.GitCheckerMock{
+		HeadHashFunc: func() (string, error) { return "deadbeef", nil },
+		DiffFunc:     func(_, _ string) (string, error) { return "diff", nil },
+	}
+	appCfg, err := config.Load(t.TempDir())
+	require.NoError(t, err)
+	cfg := Config{Mode: ModeFull, MaxIterations: 6, PlanFile: planPath, InspectorGateEnabled: true, AppConfig: appCfg}
+	r := NewWithExecutors(cfg, newMockLogger("progress.txt"), Executors{Claude: worker}, &status.PhaseHolder{})
+	r.SetGitChecker(gitMock)
+	r.reviewer = stubReviewer{out: "VERDICT: done"}
+	r.inspectorStateDB = filepath.Join(dir, "state.db")
+
+	err = r.runTaskPhaseGated(context.Background())
+	require.NoError(t, err)
+	assert.Positive(t, workerCalls, "pre-ticked checkboxes must not let the worker skip inspection")
+}
+
+func TestRunTaskPhaseGated_ResetsForgedCheckboxBeforeWorkerRuns(t *testing.T) {
+	// the plan arrives with a forged tick (worker ignored the instruction). before the worker is
+	// re-pointed at the task, the parent must reset that box so the worker sees the true pending
+	// state and the store stays the only completion authority.
+	dir := t.TempDir()
+	planPath := filepath.Join(dir, "plan.md")
+	forged := "# Plan\n\n### Task 1: Do it\n\n- [x] implement\n"
+	require.NoError(t, os.WriteFile(planPath, []byte(forged), 0o600))
+
+	var sawChecked bool
+	worker := &mocks.ExecutorMock{
+		RunFunc: func(_ context.Context, _ string) executor.Result {
+			b, _ := os.ReadFile(planPath) //nolint:gosec // test plan path from t.TempDir
+			if strings.Contains(string(b), "- [x] implement") {
+				sawChecked = true
+			}
+			return executor.Result{Signal: status.PeasantTired, Output: "x"}
+		},
+	}
+	gitMock := &mocks.GitCheckerMock{
+		HeadHashFunc: func() (string, error) { return "deadbeef", nil },
+		DiffFunc:     func(_, _ string) (string, error) { return "diff", nil },
+	}
+	appCfg, err := config.Load(t.TempDir())
+	require.NoError(t, err)
+	cfg := Config{Mode: ModeFull, MaxIterations: 6, PlanFile: planPath, InspectorGateEnabled: true, AppConfig: appCfg}
+	r := NewWithExecutors(cfg, newMockLogger("progress.txt"), Executors{Claude: worker}, &status.PhaseHolder{})
+	r.SetGitChecker(gitMock)
+	r.reviewer = stubReviewer{out: "VERDICT: done"}
+	r.inspectorStateDB = filepath.Join(dir, "state.db")
+
+	err = r.runTaskPhaseGated(context.Background())
+	require.NoError(t, err)
+	assert.False(t, sawChecked, "forged checkbox must be reset before the worker runs")
+}
+
+func TestBuildInspectorPrompt_IncludesAcceptanceCriteriaAndScopeInstruction(t *testing.T) {
+	criteria := "- [ ] Create append_line.sh\n- [ ] Make it executable"
+	got := buildInspectorPrompt("Create the append script", criteria, "diff --git a/x b/x\n+code")
+
+	assert.Contains(t, got, "Create the append script", "prompt should name the task")
+	assert.Contains(t, got, criteria, "prompt should give the inspector the task's acceptance criteria")
+	assert.Contains(t, got, "+code", "prompt should include the diff")
+	// the inspector must be told to judge scope, not just whether work happened.
+	assert.Contains(t, strings.ToLower(got), "scope", "prompt should instruct the inspector to judge scope against the criteria")
 }
 
 func TestRunTaskPhaseGated_WorkerNeverTired_StopsAtMaxIterations(t *testing.T) {

@@ -2,9 +2,11 @@ package processor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/umputun/ralphex/pkg/inspector"
 	"github.com/umputun/ralphex/pkg/oracle"
@@ -53,12 +55,22 @@ func (r *Runner) runTaskPhaseGated(ctx context.Context) error {
 			return fmt.Errorf("task phase: %w", err)
 		}
 
-		taskNum := r.nextPlanTaskPosition()
+		taskNum, err := r.nextGatedTaskPosition(store)
+		if err != nil {
+			return err
+		}
 		if taskNum == 0 {
 			r.log.PrintRaw("\nall tasks accepted by inspector, starting code review...\n")
 			return nil
 		}
 		r.log.PrintSection(status.NewTaskIterationSection(taskNum))
+
+		// reconcile: the store does not consider this task done, so reset any checkbox a worker may
+		// have ticked itself. the plan stays a faithful projection of the parent-controlled store,
+		// and the worker is pointed at the true pending task rather than a forged-complete one.
+		if rerr := r.resetTaskCheckboxes(taskNum); rerr != nil {
+			return rerr
+		}
 
 		st, err := store.Get(taskNum)
 		if err != nil {
@@ -130,7 +142,8 @@ func (r *Runner) inspectAndApply(ctx context.Context, taskNum int, preHash strin
 	}
 
 	taskTitle := r.planTaskTitle(taskNum)
-	verdict, err := inspector.Inspect(ctx, r.reviewer, buildInspectorPrompt(taskTitle, diff))
+	taskCriteria := r.planTaskCriteria(taskNum)
+	verdict, err := inspector.Inspect(ctx, r.reviewer, buildInspectorPrompt(taskTitle, taskCriteria, diff))
 	if err != nil {
 		return verdictOutcome{}, fmt.Errorf("inspector: %w", err)
 	}
@@ -141,6 +154,50 @@ func (r *Runner) inspectAndApply(ctx context.Context, taskNum int, preHash strin
 		maxAttempts = defaultMaxTaskAttempts
 	}
 	return applyVerdict(string(planContent), taskNum, cur, verdict, maxAttempts)
+}
+
+// nextGatedTaskPosition returns the 1-based position of the first task the store has NOT marked
+// done, or 0 when every task is done. Selection and the all-done decision are driven by the
+// parent-controlled state store rather than the plan's checkboxes, so a worker that ticks its own
+// boxes can neither skip inspection nor end the run — only an inspector "done" verdict sets
+// StatusDone.
+func (r *Runner) nextGatedTaskPosition(store *state.Store) (int, error) {
+	p, err := plan.ParsePlanFile(r.resolvePlanFilePath())
+	if err != nil {
+		return 0, fmt.Errorf("parse plan for task selection: %w", err)
+	}
+	for i := range p.Tasks {
+		pos := i + 1
+		st, err := store.Get(pos)
+		if err != nil {
+			return 0, fmt.Errorf("read task %d state: %w", pos, err)
+		}
+		if st.Status != state.StatusDone {
+			return pos, nil
+		}
+	}
+	return 0, nil
+}
+
+// resetTaskCheckboxes un-ticks the given task's checkboxes in the plan file so a worker-forged tick
+// cannot misdirect the next attempt. It is a no-op when the boxes are already unchecked.
+func (r *Runner) resetTaskCheckboxes(taskNum int) error {
+	path := r.resolvePlanFilePath()
+	content, err := os.ReadFile(path) //nolint:gosec // plan path is resolved from trusted config
+	if err != nil {
+		return fmt.Errorf("read plan to reset task %d checkboxes: %w", taskNum, err)
+	}
+	reset, err := plan.UncheckTask(string(content), taskNum)
+	if err != nil {
+		return fmt.Errorf("reset task %d checkboxes: %w", taskNum, err)
+	}
+	if reset == string(content) {
+		return nil
+	}
+	if err := os.WriteFile(path, []byte(reset), 0o600); err != nil {
+		return fmt.Errorf("write plan after resetting task %d checkboxes: %w", taskNum, err)
+	}
+	return nil
 }
 
 // openStateStore opens (creating dirs as needed) the per-task inspector state store.
@@ -170,6 +227,24 @@ func (r *Runner) planTaskTitle(taskNum int) string {
 	return p.Tasks[taskNum-1].Title
 }
 
+// planTaskCriteria returns the task's checklist items rendered as markdown checkboxes — the
+// acceptance criteria the inspector judges the diff against. Empty if the task is unavailable.
+func (r *Runner) planTaskCriteria(taskNum int) string {
+	p, err := plan.ParsePlanFile(r.resolvePlanFilePath())
+	if err != nil || taskNum < 1 || taskNum > len(p.Tasks) {
+		return ""
+	}
+	var b strings.Builder
+	for _, cb := range p.Tasks[taskNum-1].Checkboxes {
+		mark := " "
+		if cb.Checked {
+			mark = "x"
+		}
+		fmt.Fprintf(&b, "- [%s] %s\n", mark, cb.Text)
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
 // buildGatedTaskPrompt instructs the worker to complete exactly one task and propose completion,
 // without ticking checkboxes (the parent does that only after the inspector approves).
 func buildGatedTaskPrompt() string {
@@ -189,10 +264,10 @@ func buildGatedTaskPrompt() string {
 func (r *Runner) runOracle(ctx context.Context, taskNum int, store *state.Store) (resumed bool, err error) {
 	exec := r.externalExecutor()
 	if exec == nil {
-		return false, fmt.Errorf("oracle requires an external review tool (codex/custom) but none is configured")
+		return false, errors.New("oracle requires an external review tool (codex/custom) but none is configured")
 	}
 	if r.inputCollector == nil {
-		return false, fmt.Errorf("oracle requires interactive input but no input collector is set")
+		return false, errors.New("oracle requires interactive input but no input collector is set")
 	}
 
 	planContent, err := os.ReadFile(r.resolvePlanFilePath())
@@ -210,8 +285,8 @@ func (r *Runner) runOracle(ctx context.Context, taskNum int, store *state.Store)
 		return false, nil
 	}
 
-	if err := os.WriteFile(r.resolvePlanFilePath(), []byte(out.Plan), 0o600); err != nil {
-		return false, fmt.Errorf("write plan after oracle: %w", err)
+	if werr := os.WriteFile(r.resolvePlanFilePath(), []byte(out.Plan), 0o600); werr != nil {
+		return false, fmt.Errorf("write plan after oracle: %w", werr)
 	}
 	st, err := store.Get(taskNum)
 	if err != nil {
@@ -257,20 +332,33 @@ func (a inputApprover) Approve(oldStr, newStr string) (bool, error) {
 	q := fmt.Sprintf("Oracle proposes a fix to the task spec:\n  OLD: %s\n  NEW: %s\nApply this change?", oldStr, newStr)
 	ans, err := a.ic.AskQuestion(a.ctx, q, []string{"Yes", "No"})
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("oracle approval prompt: %w", err)
 	}
 	return ans == "Yes", nil
 }
 
-// buildInspectorPrompt builds the verdict prompt sent to the external inspector tool.
-func buildInspectorPrompt(taskTitle, diff string) string {
+// buildInspectorPrompt builds the verdict prompt sent to the external inspector tool. The task's
+// acceptance criteria (its checklist) are included so the inspector can judge the diff against what
+// the task actually asks for — both completeness (did the criteria get met) and scope (does the diff
+// stay within them) — rather than falling back to a blunt "is the diff non-empty" heuristic.
+func buildInspectorPrompt(taskTitle, taskCriteria, diff string) string {
+	criteria := strings.TrimSpace(taskCriteria)
+	if criteria == "" {
+		criteria = "(no explicit acceptance criteria provided)"
+	}
 	return "You are inspecting a worker agent's completion of a single task.\n\n" +
 		"TASK: " + taskTitle + "\n\n" +
+		"ACCEPTANCE CRITERIA (what this task — and only this task — should accomplish):\n" +
+		criteria + "\n\n" +
 		"The worker's git diff for this task:\n\n" +
 		diff + "\n\n" +
+		"Judge the diff against the acceptance criteria on BOTH axes:\n" +
+		"- completeness: do the changes satisfy every criterion? an empty diff can still be correct if a\n" +
+		"  criterion is phrased as 'ensure X' and X already holds.\n" +
+		"- scope: do the changes stay within this task? work that belongs to other tasks is out of scope.\n\n" +
 		"Decide one of:\n" +
-		"- VERDICT: done — the task is complete and correct\n" +
-		"- VERDICT: reject | <YELLING IN CAPS WITH SPECIFICS> — incomplete or wrong; the worker must retry\n" +
+		"- VERDICT: done — the criteria are met and the diff stays in scope\n" +
+		"- VERDICT: reject | <YELLING IN CAPS WITH SPECIFICS> — incomplete, wrong, or out of scope; retry\n" +
 		"- VERDICT: update | <polite explanation> — the task itself appears infeasible or malformed\n\n" +
 		"Respond with EXACTLY one line in that format and nothing else."
 }
