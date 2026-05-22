@@ -48,7 +48,7 @@ func (r *Runner) runTaskPhaseGated(ctx context.Context) error {
 	}
 	defer func() { _ = store.Close() }()
 
-	prompt := r.replacePromptVariables(buildGatedTaskPrompt())
+	prompt := r.buildGatedTaskPrompt()
 
 	for i := 1; i <= r.cfg.MaxIterations; i++ {
 		if err := ctx.Err(); err != nil {
@@ -151,7 +151,7 @@ func (r *Runner) inspectAndApply(ctx context.Context, taskNum int, preHash strin
 
 	taskTitle := r.planTaskTitle(taskNum)
 	taskCriteria := r.planTaskCriteria(taskNum)
-	verdict, err := inspector.Inspect(ctx, r.reviewer, buildInspectorPrompt(taskTitle, taskCriteria, diff))
+	verdict, err := inspector.Inspect(ctx, r.reviewer, r.buildInspectorPrompt(taskTitle, taskCriteria, diff))
 	if err != nil {
 		return verdictOutcome{}, fmt.Errorf("inspector: %w", err)
 	}
@@ -269,16 +269,12 @@ func (r *Runner) planTaskCriteria(taskNum int) string {
 }
 
 // buildGatedTaskPrompt instructs the worker to complete exactly one task and propose completion,
-// without ticking checkboxes (the parent does that only after the inspector approves).
-func buildGatedTaskPrompt() string {
-	return "Work on ONLY the next uncompleted task in the plan file {{PLAN_FILE}}.\n\n" +
-		"Rules:\n" +
-		"- Implement just that one task. Do NOT start other tasks.\n" +
-		"- Do NOT tick any checkboxes. Completion is recorded by a separate inspector, not by you.\n" +
-		"- Commit your work with git when finished.\n" +
-		"- If a previous attempt left an 'INSPECTOR REJECTION' note in the task, address it specifically.\n" +
-		"- When you have committed your work for this one task, output exactly:\n" +
-		status.PeasantTired + "\n"
+// without ticking checkboxes (the parent does that only after the inspector approves). The prompt
+// body is the customizable gated_task template; {{COMPLETION_SIGNAL}} is bound to the authoritative
+// signal constant in code so a customized template can never drift from what the parser expects.
+func (r *Runner) buildGatedTaskPrompt() string {
+	prompt := strings.ReplaceAll(r.cfg.AppConfig.GatedTaskPrompt, "{{COMPLETION_SIGNAL}}", status.PeasantTired)
+	return r.replacePromptVariables(prompt)
 }
 
 // resolveEscalation runs the oracle for an escalated task and maps its outcome to a loop-control
@@ -313,11 +309,11 @@ func (r *Runner) runOracle(ctx context.Context, taskNum int, store *state.Store,
 		return false, fmt.Errorf("read plan for oracle: %w", err)
 	}
 
-	if strings.TrimSpace(reason) == "" {
-		reason = "rejected repeatedly by the inspector"
-	}
+	// buildOraclePrompt defaults an empty reason, so the threaded escalation reason (inspector
+	// payload, or the restart sentinel) flows through to the customizable oracle template.
+	oraclePrompt := r.buildOraclePrompt(r.planTaskTitle(taskNum), reason, string(planContent))
 	out, err := oracle.Resolve(ctx, executorProposer{exec: exec}, inputApprover{ic: r.inputCollector, ctx: ctx},
-		string(planContent), r.planTaskTitle(taskNum), reason)
+		oraclePrompt, string(planContent))
 	if err != nil {
 		return false, fmt.Errorf("oracle: %w", err)
 	}
@@ -378,28 +374,34 @@ func (a inputApprover) Approve(oldStr, newStr string) (bool, error) {
 	return ans == "Yes", nil
 }
 
-// buildInspectorPrompt builds the verdict prompt sent to the external inspector tool. The task's
-// acceptance criteria (its checklist) are included so the inspector can judge the diff against what
-// the task actually asks for — both completeness (did the criteria get met) and scope (does the diff
-// stay within them) — rather than falling back to a blunt "is the diff non-empty" heuristic.
-func buildInspectorPrompt(taskTitle, taskCriteria, diff string) string {
+// buildInspectorPrompt builds the verdict prompt sent to the external inspector tool from the
+// customizable inspector template. The task's acceptance criteria (its checklist) are included so
+// the inspector can judge the diff against what the task actually asks for — both completeness (did
+// the criteria get met) and scope (does the diff stay within them) — rather than falling back to a
+// blunt "is the diff non-empty" heuristic. Base variables are expanded on the template before the
+// dynamic title/criteria/diff are injected, so injected content is never re-scanned for variables.
+func (r *Runner) buildInspectorPrompt(taskTitle, taskCriteria, diff string) string {
 	criteria := strings.TrimSpace(taskCriteria)
 	if criteria == "" {
 		criteria = "(no explicit acceptance criteria provided)"
 	}
-	return "You are inspecting a worker agent's completion of a single task.\n\n" +
-		"TASK: " + taskTitle + "\n\n" +
-		"ACCEPTANCE CRITERIA (what this task — and only this task — should accomplish):\n" +
-		criteria + "\n\n" +
-		"The worker's git diff for this task:\n\n" +
-		diff + "\n\n" +
-		"Judge the diff against the acceptance criteria on BOTH axes:\n" +
-		"- completeness: do the changes satisfy every criterion? an empty diff can still be correct if a\n" +
-		"  criterion is phrased as 'ensure X' and X already holds.\n" +
-		"- scope: do the changes stay within this task? work that belongs to other tasks is out of scope.\n\n" +
-		"Decide one of:\n" +
-		"- VERDICT: done — the criteria are met and the diff stays in scope\n" +
-		"- VERDICT: reject | <YELLING IN CAPS WITH SPECIFICS> — incomplete, wrong, or out of scope; retry\n" +
-		"- VERDICT: update | <polite explanation> — the task itself appears infeasible or malformed\n\n" +
-		"Respond with EXACTLY one line in that format and nothing else."
+	prompt := r.replaceBaseVariables(r.cfg.AppConfig.InspectorPrompt)
+	prompt = strings.ReplaceAll(prompt, "{{TASK_TITLE}}", taskTitle)
+	prompt = strings.ReplaceAll(prompt, "{{ACCEPTANCE_CRITERIA}}", criteria)
+	prompt = strings.ReplaceAll(prompt, "{{TASK_DIFF}}", diff)
+	return prompt
+}
+
+// buildOraclePrompt builds the escalation prompt sent to the external oracle tool from the
+// customizable oracle template. As with the inspector prompt, base variables are expanded first so
+// the injected plan content is never re-scanned for template variables.
+func (r *Runner) buildOraclePrompt(taskTitle, reason, planContent string) string {
+	if strings.TrimSpace(reason) == "" {
+		reason = "the task was rejected repeatedly by the inspector"
+	}
+	prompt := r.replaceBaseVariables(r.cfg.AppConfig.OraclePrompt)
+	prompt = strings.ReplaceAll(prompt, "{{TASK_TITLE}}", taskTitle)
+	prompt = strings.ReplaceAll(prompt, "{{ESCALATION_REASON}}", reason)
+	prompt = strings.ReplaceAll(prompt, "{{PLAN_CONTENT}}", planContent)
+	return prompt
 }

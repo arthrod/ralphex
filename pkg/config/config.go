@@ -25,6 +25,9 @@ const (
 	customReviewPromptFile = "custom_review.txt"
 	customEvalPromptFile   = "custom_eval.txt"
 	codexReviewPromptFile  = "codex_review.txt"
+	gatedTaskPromptFile    = "gated_task.txt"
+	inspectorPromptFile    = "inspector.txt"
+	oraclePromptFile       = "oracle.txt"
 )
 
 // Config holds all configuration settings for ralphex.
@@ -127,6 +130,9 @@ type Config struct {
 	CustomReviewPrompt string `json:"-"`
 	CustomEvalPrompt   string `json:"-"`
 	CodexReviewPrompt  string `json:"-"`
+	GatedTaskPrompt    string `json:"-"`
+	InspectorPrompt    string `json:"-"`
+	OraclePrompt       string `json:"-"`
 
 	// custom agents (loaded separately from files)
 	CustomAgents []CustomAgent `json:"-"`
@@ -363,6 +369,9 @@ func loadConfigFromDirs(globalDir, localDir string) (*Config, error) {
 		CustomReviewPrompt: prompts.CustomReview,
 		CustomEvalPrompt:   prompts.CustomEval,
 		CodexReviewPrompt:  prompts.CodexReview,
+		GatedTaskPrompt:    prompts.GatedTask,
+		InspectorPrompt:    prompts.Inspector,
+		OraclePrompt:       prompts.Oracle,
 		CustomAgents:       agents,
 		configDir:          globalDir,
 		localDir:           localDir,

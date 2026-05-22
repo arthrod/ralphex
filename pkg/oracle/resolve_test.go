@@ -33,7 +33,7 @@ func TestResolve_ApprovedAppliesSubstitution(t *testing.T) {
 	prop := fakeProposer{out: "OLD: FooBar\nNEW: FooBaz"}
 	appr := &fakeApprover{approve: true}
 
-	out, err := Resolve(context.Background(), prop, appr, resolvePlan, "Do it", "infeasible")
+	out, err := Resolve(context.Background(), prop, appr, "oracle prompt", resolvePlan)
 	require.NoError(t, err)
 
 	assert.True(t, out.Applied)
@@ -47,7 +47,7 @@ func TestResolve_RejectedLeavesPlanUnchanged(t *testing.T) {
 	prop := fakeProposer{out: "OLD: FooBar\nNEW: FooBaz"}
 	appr := &fakeApprover{approve: false}
 
-	out, err := Resolve(context.Background(), prop, appr, resolvePlan, "Do it", "infeasible")
+	out, err := Resolve(context.Background(), prop, appr, "oracle prompt", resolvePlan)
 	require.NoError(t, err)
 
 	assert.False(t, out.Applied)
@@ -58,7 +58,7 @@ func TestResolve_MalformedProposalErrors(t *testing.T) {
 	prop := fakeProposer{out: "I have no idea"}
 	appr := &fakeApprover{approve: true}
 
-	_, err := Resolve(context.Background(), prop, appr, resolvePlan, "Do it", "infeasible")
+	_, err := Resolve(context.Background(), prop, appr, "oracle prompt", resolvePlan)
 	require.Error(t, err)
 }
 
@@ -66,7 +66,7 @@ func TestResolve_ProposerErrorPropagates(t *testing.T) {
 	prop := fakeProposer{err: errors.New("model down")}
 	appr := &fakeApprover{approve: true}
 
-	_, err := Resolve(context.Background(), prop, appr, resolvePlan, "Do it", "infeasible")
+	_, err := Resolve(context.Background(), prop, appr, "oracle prompt", resolvePlan)
 	require.Error(t, err)
 }
 
@@ -74,6 +74,6 @@ func TestResolve_SubstitutionNotInPlanErrors(t *testing.T) {
 	prop := fakeProposer{out: "OLD: not present anywhere\nNEW: x"}
 	appr := &fakeApprover{approve: true}
 
-	_, err := Resolve(context.Background(), prop, appr, resolvePlan, "Do it", "infeasible")
+	_, err := Resolve(context.Background(), prop, appr, "oracle prompt", resolvePlan)
 	require.Error(t, err)
 }

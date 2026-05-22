@@ -232,14 +232,50 @@ func TestRunTaskPhaseGated_ResetsForgedCheckboxBeforeWorkerRuns(t *testing.T) {
 }
 
 func TestBuildInspectorPrompt_IncludesAcceptanceCriteriaAndScopeInstruction(t *testing.T) {
+	appCfg, err := config.Load(t.TempDir())
+	require.NoError(t, err)
+	r := NewWithExecutors(Config{AppConfig: appCfg}, newMockLogger("progress.txt"), Executors{}, &status.PhaseHolder{})
+
 	criteria := "- [ ] Create append_line.sh\n- [ ] Make it executable"
-	got := buildInspectorPrompt("Create the append script", criteria, "diff --git a/x b/x\n+code")
+	got := r.buildInspectorPrompt("Create the append script", criteria, "diff --git a/x b/x\n+code")
 
 	assert.Contains(t, got, "Create the append script", "prompt should name the task")
 	assert.Contains(t, got, criteria, "prompt should give the inspector the task's acceptance criteria")
 	assert.Contains(t, got, "+code", "prompt should include the diff")
 	// the inspector must be told to judge scope, not just whether work happened.
 	assert.Contains(t, strings.ToLower(got), "scope", "prompt should instruct the inspector to judge scope against the criteria")
+}
+
+func TestBuildGatedTaskPrompt_BindsCompletionSignalAndPlanFile(t *testing.T) {
+	appCfg, err := config.Load(t.TempDir())
+	require.NoError(t, err)
+	r := NewWithExecutors(Config{AppConfig: appCfg, PlanFile: "docs/plans/x.md"}, newMockLogger("progress.txt"), Executors{}, &status.PhaseHolder{})
+
+	got := r.buildGatedTaskPrompt()
+	assert.Contains(t, got, status.PeasantTired, "completion signal must be bound from the authoritative constant")
+	assert.NotContains(t, got, "{{COMPLETION_SIGNAL}}", "template placeholder must be substituted")
+	assert.Contains(t, got, "docs/plans/x.md", "{{PLAN_FILE}} must be expanded")
+}
+
+func TestBuildOraclePrompt_InjectsTitleReasonAndPlan(t *testing.T) {
+	appCfg, err := config.Load(t.TempDir())
+	require.NoError(t, err)
+	r := NewWithExecutors(Config{AppConfig: appCfg}, newMockLogger("progress.txt"), Executors{}, &status.PhaseHolder{})
+
+	got := r.buildOraclePrompt("Wire the widget", "rejected three times", "### Task 1: Wire the widget\n")
+	assert.Contains(t, got, "Wire the widget")
+	assert.Contains(t, got, "rejected three times")
+	assert.Contains(t, got, "### Task 1: Wire the widget")
+	assert.NotContains(t, got, "{{PLAN_CONTENT}}")
+}
+
+func TestBuildOraclePrompt_DefaultsEmptyReason(t *testing.T) {
+	appCfg, err := config.Load(t.TempDir())
+	require.NoError(t, err)
+	r := NewWithExecutors(Config{AppConfig: appCfg}, newMockLogger("progress.txt"), Executors{}, &status.PhaseHolder{})
+
+	got := r.buildOraclePrompt("T", "", "plan")
+	assert.Contains(t, got, "rejected repeatedly by the inspector", "empty reason falls back to default text")
 }
 
 func TestRunTaskPhaseGated_WorkerNeverTired_StopsAtMaxIterations(t *testing.T) {

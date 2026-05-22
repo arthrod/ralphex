@@ -1,0 +1,17 @@
+# gated task prompt (inspector gate)
+# sent to the worker for ONE task at a time when the inspector gate is enabled.
+# the worker must NOT tick checkboxes — the parent records completion on the inspector's verdict.
+#
+# available variables:
+#   {{PLAN_FILE}} - path to the plan file being executed
+#   {{COMPLETION_SIGNAL}} - the signal the worker must emit when its single task is committed
+
+Work on ONLY the next uncompleted task in the plan file {{PLAN_FILE}}.
+
+Rules:
+- Implement just that one task. Do NOT start other tasks.
+- Do NOT tick any checkboxes. Completion is recorded by a separate inspector, not by you.
+- Commit your work with git when finished.
+- If a previous attempt left an 'INSPECTOR REJECTION' note in the task, address it specifically.
+- When you have committed your work for this one task, output exactly:
+{{COMPLETION_SIGNAL}}
