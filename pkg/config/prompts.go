@@ -22,6 +22,9 @@ type Prompts struct {
 	CustomReview string
 	CustomEval   string
 	CodexReview  string
+	GatedTask    string
+	Inspector    string
+	Oracle       string
 }
 
 // promptLoader implements PromptLoader with embedded filesystem fallback.
@@ -82,6 +85,21 @@ func (p *promptLoader) Load(localDir, globalDir string) (Prompts, error) {
 	prompts.CodexReview, err = p.loadPromptWithLocalFallback(localDir, globalDir, codexReviewPromptFile)
 	if err != nil {
 		return Prompts{}, fmt.Errorf("load codex_review prompt: %w", err)
+	}
+
+	prompts.GatedTask, err = p.loadPromptWithLocalFallback(localDir, globalDir, gatedTaskPromptFile)
+	if err != nil {
+		return Prompts{}, fmt.Errorf("load gated_task prompt: %w", err)
+	}
+
+	prompts.Inspector, err = p.loadPromptWithLocalFallback(localDir, globalDir, inspectorPromptFile)
+	if err != nil {
+		return Prompts{}, fmt.Errorf("load inspector prompt: %w", err)
+	}
+
+	prompts.Oracle, err = p.loadPromptWithLocalFallback(localDir, globalDir, oraclePromptFile)
+	if err != nil {
+		return Prompts{}, fmt.Errorf("load oracle prompt: %w", err)
 	}
 
 	return prompts, nil

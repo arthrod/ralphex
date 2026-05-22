@@ -151,8 +151,24 @@ NEW: <replacement text>
 `OLD` must be a literal substring of the current plan, or the substitution errors out — the oracle
 never silently changes nothing.
 
+## Customizing the prompts
+
+The three gate prompts are ordinary ralphex prompt files and follow the usual per-file fallback
+(local `.ralphex/prompts/` → global `~/.config/ralphex/prompts/` → embedded default):
+
+| File | Sent to | Template variables |
+|------|---------|--------------------|
+| `gated_task.txt` | the worker, one task at a time | `{{PLAN_FILE}}`, `{{COMPLETION_SIGNAL}}` |
+| `inspector.txt` | the inspector tool | `{{TASK_TITLE}}`, `{{ACCEPTANCE_CRITERIA}}`, `{{TASK_DIFF}}` |
+| `oracle.txt` | the oracle tool | `{{TASK_TITLE}}`, `{{ESCALATION_REASON}}`, `{{PLAN_CONTENT}}` |
+
+`{{COMPLETION_SIGNAL}}` is bound to the worker-completion signal constant in code, so a customized
+`gated_task.txt` can never drift from the signal ralphex actually parses. When customizing
+`inspector.txt` keep the `VERDICT: done | reject | update` keywords, and when customizing
+`oracle.txt` keep the two-line `OLD:` / `NEW:` response contract — ralphex parses both. Base
+variables (`{{PLAN_FILE}}`, `{{DEFAULT_BRANCH}}`, etc.) are also expanded in all three.
+
 ## Limitations
 
 - The oracle's approval step needs an interactive terminal; it can't run fully unattended.
-- The inspector, oracle, and gated-task prompts are built in code (not yet customizable prompt files).
 - The interaction between worktree mode and the state DB path is not yet validated.

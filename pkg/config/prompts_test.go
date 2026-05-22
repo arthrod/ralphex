@@ -76,6 +76,45 @@ func TestPromptLoader_Load_NoUserDir(t *testing.T) {
 	assert.Contains(t, prompts.MakePlan, "{{PLAN_DESCRIPTION}}")
 }
 
+func TestPromptLoader_Load_GatePromptsFromEmbedded(t *testing.T) {
+	tmpDir := t.TempDir()
+	globalDir := filepath.Join(tmpDir, "nonexistent")
+
+	loader := newPromptLoader(defaultsFS)
+	prompts, err := loader.Load("", globalDir)
+	require.NoError(t, err)
+
+	// embedded gate prompts expose their template variables and verdict/proposal contracts
+	assert.Contains(t, prompts.GatedTask, "{{PLAN_FILE}}")
+	assert.Contains(t, prompts.GatedTask, "{{COMPLETION_SIGNAL}}")
+	assert.Contains(t, prompts.Inspector, "{{TASK_TITLE}}")
+	assert.Contains(t, prompts.Inspector, "{{ACCEPTANCE_CRITERIA}}")
+	assert.Contains(t, prompts.Inspector, "{{TASK_DIFF}}")
+	assert.Contains(t, prompts.Inspector, "VERDICT:")
+	assert.Contains(t, prompts.Oracle, "{{TASK_TITLE}}")
+	assert.Contains(t, prompts.Oracle, "{{ESCALATION_REASON}}")
+	assert.Contains(t, prompts.Oracle, "{{PLAN_CONTENT}}")
+	assert.Contains(t, prompts.Oracle, "OLD:")
+}
+
+func TestPromptLoader_Load_GatePromptsUserOverride(t *testing.T) {
+	tmpDir := t.TempDir()
+	globalDir := filepath.Join(tmpDir, "prompts")
+	require.NoError(t, os.MkdirAll(globalDir, 0o700))
+
+	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "gated_task.txt"), []byte("custom gated"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "inspector.txt"), []byte("custom inspector"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "oracle.txt"), []byte("custom oracle"), 0o600))
+
+	loader := newPromptLoader(defaultsFS)
+	prompts, err := loader.Load("", globalDir)
+	require.NoError(t, err)
+
+	assert.Equal(t, "custom gated", prompts.GatedTask)
+	assert.Equal(t, "custom inspector", prompts.Inspector)
+	assert.Equal(t, "custom oracle", prompts.Oracle)
+}
+
 func TestPromptLoader_Load_EmptyUserFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	globalDir := filepath.Join(tmpDir, "prompts")

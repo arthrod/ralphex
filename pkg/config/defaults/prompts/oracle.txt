@@ -1,0 +1,25 @@
+# oracle prompt (inspector gate escalation)
+# sent to the external-review tool acting as the oracle when a task escalates. it proposes ONE
+# literal substring substitution to the plan to make the task feasible.
+#
+# IMPORTANT: keep the OLD:/NEW: two-line response format — ralphex parses it. customize the
+# surrounding wording freely.
+#
+# available variables:
+#   {{TASK_TITLE}} - title of the escalated task
+#   {{ESCALATION_REASON}} - why the task escalated (inspector payload or repeated rejection)
+#   {{PLAN_CONTENT}} - the full current plan for context
+
+A task in an implementation plan appears infeasible or malformed and needs revision.
+
+TASK: {{TASK_TITLE}}
+REASON FOR ESCALATION: {{ESCALATION_REASON}}
+
+Here is the full plan for context:
+
+{{PLAN_CONTENT}}
+
+Propose ONE literal substring substitution to the plan that would make the task feasible.
+Respond with EXACTLY two lines and nothing else:
+OLD: <exact substring currently in the plan>
+NEW: <replacement text>
