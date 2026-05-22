@@ -3,6 +3,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -10,6 +12,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"runtime/debug"
 	"strings"
 	"sync"
@@ -369,6 +372,9 @@ func selectAndExecutePlan(ctx context.Context, o opts, req executePlanRequest, s
 
 // getCurrentBranch returns the current git branch name or "unknown" if unavailable.
 func getCurrentBranch(gitSvc *git.Service) string {
+	if gitSvc == nil {
+		return "unknown"
+	}
 	branch, err := gitSvc.CurrentBranch()
 	if err != nil || branch == "" {
 		return "unknown"
@@ -882,6 +888,47 @@ func validateFlags(o opts) error {
 	return nil
 }
 
+// unsafeFilenameChars matches any run of characters not safe in a filename fragment.
+var unsafeFilenameChars = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
+
+// sanitizeBranchForFilename maps a branch name to a safe filename fragment, replacing characters
+// outside [A-Za-z0-9._-] (e.g. the "/" in feature/foo) with "-". returns "" for an empty or
+// unknown branch so the caller can fall back to an unnamespaced default.
+func sanitizeBranchForFilename(branch string) string {
+	if branch == "" || branch == "unknown" {
+		return ""
+	}
+	return strings.Trim(unsafeFilenameChars.ReplaceAllString(branch, "-"), "-")
+}
+
+// inspectorStateDBPath returns the absolute path to the inspector gate's per-task state DB.
+// it lives under the MAIN repo's .ralphex/ so it survives worktree teardown and a later restart,
+// and is namespaced so parallel worktrees running different plans never collide on task positions.
+// mainRoot is the main repository root (not the worktree).
+//
+// The namespace is derived from the branch when known, falling back to the plan file when branch
+// detection failed (detached HEAD, transient git error) so distinct runs still get distinct files.
+// A short hash of the raw identifier is appended, so two identifiers that sanitize to the same
+// readable fragment (e.g. "feature/foo" vs "feature-foo") never share a DB. A blank result (no
+// mainRoot, or neither branch nor plan available) falls back to the runner's CWD-relative default.
+func inspectorStateDBPath(mainRoot, branch, planFile string) string {
+	if mainRoot == "" {
+		return ""
+	}
+	// pick the namespace identity: prefer the branch, fall back to the plan file.
+	ident, frag := branch, sanitizeBranchForFilename(branch)
+	if frag == "" && planFile != "" {
+		ident = planFile
+		frag = sanitizeBranchForFilename(filepath.Base(planFile))
+	}
+	if frag == "" {
+		return filepath.Join(mainRoot, ".ralphex", "inspector-state.db")
+	}
+	sum := sha256.Sum256([]byte(ident))
+	name := fmt.Sprintf("inspector-state-%s-%s.db", frag, hex.EncodeToString(sum[:])[:8])
+	return filepath.Join(mainRoot, ".ralphex", name)
+}
+
 // createRunner creates a processor.Runner with the given configuration.
 func createRunner(req executePlanRequest, o opts, log processor.Logger, holder *status.PhaseHolder) *processor.Runner {
 	// --codex-only mode forces codex enabled regardless of config
@@ -913,6 +960,21 @@ func createRunner(req executePlanRequest, o opts, log processor.Logger, holder *
 		reviewModel = o.ReviewModel
 	}
 
+	// resolve the inspector-gate state DB path. anchor it to the MAIN repo (req.MainGitSvc in
+	// worktree mode, else req.GitSvc) and namespace it by branch, so the per-task state survives
+	// worktree teardown/restart and parallel worktrees on different plans don't collide.
+	gateActive := req.Config.InspectorGateEnabled || o.InspectorGate
+	var stateDB string
+	if gateActive {
+		mainSvc := req.GitSvc
+		if req.MainGitSvc != nil {
+			mainSvc = req.MainGitSvc
+		}
+		if mainSvc != nil {
+			stateDB = inspectorStateDBPath(mainSvc.Root(), getCurrentBranch(req.GitSvc), req.PlanFile)
+		}
+	}
+
 	r := processor.New(processor.Config{
 		PlanFile:              req.PlanFile,
 		ProgressPath:          log.Path(),
@@ -930,9 +992,10 @@ func createRunner(req executePlanRequest, o opts, log processor.Logger, holder *
 		DefaultBranch:         req.BaseRef,
 		TaskModel:             taskModel,
 		ReviewModel:           reviewModel,
-		InspectorGateEnabled:  req.Config.InspectorGateEnabled || o.InspectorGate,
+		InspectorGateEnabled:  gateActive,
 		MaxTaskAttempts:       req.Config.MaxTaskAttempts,
 		OracleAutoApprove:     req.Config.OracleAutoApprove,
+		InspectorStateDB:      stateDB,
 		AppConfig:             req.Config,
 	}, log, holder)
 	if req.GitSvc != nil {

@@ -2402,3 +2402,57 @@ func branchExists(t *testing.T, dir, branch string) bool {
 	require.NoError(t, err)
 	return strings.TrimSpace(string(out)) != ""
 }
+
+func TestSanitizeBranchForFilename(t *testing.T) {
+	tests := []struct {
+		name, branch, want string
+	}{
+		{"plain", "fix-issues", "fix-issues"},
+		{"slash", "feature/foo", "feature-foo"},
+		{"nested slashes", "user/feat/bar", "user-feat-bar"},
+		{"spaces and colon", "wip: my branch", "wip-my-branch"},
+		{"empty", "", ""},
+		{"unknown sentinel", "unknown", ""},
+		{"keeps dots and underscores", "v1.2_rc", "v1.2_rc"},
+		{"trims leading/trailing dashes", "/weird/", "weird"},
+		{"all unsafe chars sanitize to empty", "///", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, sanitizeBranchForFilename(tt.branch))
+		})
+	}
+}
+
+func TestInspectorStateDBPath(t *testing.T) {
+	root := t.TempDir() // variable root keeps the gocritic filepathJoin rule happy
+	t.Run("anchored to main root and namespaced by branch", func(t *testing.T) {
+		got := inspectorStateDBPath(root, "feature/foo", "docs/plans/x.md")
+		assert.Equal(t, filepath.Dir(got), filepath.Join(root, ".ralphex"), "lives under the main repo .ralphex")
+		assert.Contains(t, filepath.Base(got), "inspector-state-feature-foo-", "readable branch fragment in the name")
+		assert.True(t, strings.HasSuffix(got, ".db"))
+	})
+	t.Run("empty main root yields blank (runner uses its CWD default)", func(t *testing.T) {
+		assert.Empty(t, inspectorStateDBPath("", "fix-issues", "p.md"))
+	})
+	t.Run("two branches map to distinct files in the same main repo", func(t *testing.T) {
+		a := inspectorStateDBPath(root, "plan-a", "p.md")
+		b := inspectorStateDBPath(root, "plan-b", "p.md")
+		assert.NotEqual(t, a, b, "parallel worktrees on different plans must not share a state db")
+	})
+	t.Run("branches that sanitize to the same fragment stay distinct via the hash", func(t *testing.T) {
+		a := inspectorStateDBPath(root, "feature/foo", "p.md")
+		b := inspectorStateDBPath(root, "feature-foo", "p.md")
+		assert.NotEqual(t, a, b, "feature/foo and feature-foo must not collide")
+	})
+	t.Run("unknown branch falls back to the plan file for the namespace", func(t *testing.T) {
+		a := inspectorStateDBPath(root, "unknown", "docs/plans/alpha.md")
+		b := inspectorStateDBPath(root, "unknown", "docs/plans/beta.md")
+		assert.NotEqual(t, a, b, "distinct plans must not share a db even when the branch is unknown")
+		assert.Contains(t, filepath.Base(a), "alpha", "plan basename used as the readable fragment")
+	})
+	t.Run("no branch and no plan falls back to the unnamespaced default", func(t *testing.T) {
+		got := inspectorStateDBPath(root, "", "")
+		assert.Equal(t, filepath.Join(root, ".ralphex", "inspector-state.db"), got)
+	})
+}

@@ -63,6 +63,7 @@ type Config struct {
 	InspectorGateEnabled  bool           // when true, task phase uses the per-task credential-gated inspector loop
 	MaxTaskAttempts       int            // reject threshold before escalating a task to the oracle (0 = default)
 	OracleAutoApprove     bool           // when true, oracle proposals are auto-approved (unattended gated runs)
+	InspectorStateDB      string         // sqlite path for per-task gate state (empty = default under CWD .ralphex/)
 	AppConfig             *config.Config // full application config (for executors and prompts)
 }
 
@@ -288,6 +289,7 @@ func NewWithExecutors(cfg Config, log Logger, execs Executors, holder *status.Ph
 		reviewer:             reviewer,
 		maxTaskAttempts:      cfg.MaxTaskAttempts,
 		oracleAutoApprove:    cfg.OracleAutoApprove,
+		inspectorStateDB:     cfg.InspectorStateDB,
 	}
 }
 
