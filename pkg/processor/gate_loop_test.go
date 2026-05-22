@@ -246,6 +246,16 @@ func TestBuildInspectorPrompt_IncludesAcceptanceCriteriaAndScopeInstruction(t *t
 	assert.Contains(t, strings.ToLower(got), "scope", "prompt should instruct the inspector to judge scope against the criteria")
 }
 
+func TestBuildInspectorPrompt_DefaultsWhenCriteriaEmpty(t *testing.T) {
+	appCfg, err := config.Load(t.TempDir())
+	require.NoError(t, err)
+	r := NewWithExecutors(Config{AppConfig: appCfg}, newMockLogger("progress.txt"), Executors{}, &status.PhaseHolder{})
+
+	got := r.buildInspectorPrompt("A task with no checklist", "", "diff")
+	assert.Contains(t, got, "(no explicit acceptance criteria provided)", "empty criteria falls back to explicit default text")
+	assert.NotContains(t, got, "{{ACCEPTANCE_CRITERIA}}", "placeholder must always be substituted")
+}
+
 func TestBuildGatedTaskPrompt_BindsCompletionSignalAndPlanFile(t *testing.T) {
 	appCfg, err := config.Load(t.TempDir())
 	require.NoError(t, err)
