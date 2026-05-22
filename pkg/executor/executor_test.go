@@ -631,6 +631,22 @@ func TestClaudeChildEnv_ScrubsConfiguredKeys(t *testing.T) {
 			want:           []string{"ANTHROPIC_API_KEY=secret", "KEEP=1"},
 		},
 		{
+			// preserve must win over an overlapping scrub_env_keys entry, or the documented
+			// passthrough guarantee would be silently broken.
+			name:           "preserve api key wins over scrubbing ANTHROPIC_API_KEY",
+			env:            []string{"ANTHROPIC_API_KEY=secret", "UGABUGA_INSPECTOR_TOKEN=tok", "CLAUDECODE=1", "KEEP=1"},
+			preserveAPIKey: true,
+			scrubKeys:      []string{"ANTHROPIC_API_KEY", "UGABUGA_INSPECTOR_TOKEN"},
+			want:           []string{"ANTHROPIC_API_KEY=secret", "KEEP=1"},
+		},
+		{
+			name:           "without preserve, scrubbing ANTHROPIC_API_KEY removes it",
+			env:            []string{"ANTHROPIC_API_KEY=secret", "CLAUDECODE=1", "KEEP=1"},
+			preserveAPIKey: false,
+			scrubKeys:      []string{"ANTHROPIC_API_KEY"},
+			want:           []string{"KEEP=1"},
+		},
+		{
 			name:      "no configured keys behaves like default",
 			env:       []string{"PATH=/usr/bin", "CLAUDECODE=1"},
 			scrubKeys: nil,

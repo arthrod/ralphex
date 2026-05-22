@@ -117,6 +117,38 @@ scrub_env_keys = UGABUGA_INSPECTOR_TOKEN, FOO_SECRET
 	assert.Equal(t, []string{"UGABUGA_INSPECTOR_TOKEN", "FOO_SECRET"}, values.ScrubEnvKeys)
 }
 
+func TestValuesLoader_Load_ScrubEnvKeys_LocalOverridesGlobal(t *testing.T) {
+	tmpDir := t.TempDir()
+	globalConfig := filepath.Join(tmpDir, "global-config")
+	localConfig := filepath.Join(tmpDir, "local-config")
+
+	require.NoError(t, os.WriteFile(globalConfig, []byte("scrub_env_keys = A, B\n"), 0o600))
+	require.NoError(t, os.WriteFile(localConfig, []byte("scrub_env_keys = C\n"), 0o600))
+
+	loader := newValuesLoader(defaultsFS)
+	values, err := loader.Load(localConfig, globalConfig)
+	require.NoError(t, err)
+
+	// scrub_env_keys follows the same whole-list local-overrides-global semantics as the
+	// error/limit pattern lists (mergeExtraFrom replaces, not appends).
+	assert.Equal(t, []string{"C"}, values.ScrubEnvKeys)
+}
+
+func TestValues_mergeExtraFrom_ScrubEnvKeys(t *testing.T) {
+	t.Run("non-empty src replaces dst", func(t *testing.T) {
+		dst := Values{ScrubEnvKeys: []string{"A", "B"}}
+		src := Values{ScrubEnvKeys: []string{"C"}}
+		dst.mergeExtraFrom(&src)
+		assert.Equal(t, []string{"C"}, dst.ScrubEnvKeys)
+	})
+	t.Run("empty src preserves dst", func(t *testing.T) {
+		dst := Values{ScrubEnvKeys: []string{"A", "B"}}
+		src := Values{ScrubEnvKeys: nil}
+		dst.mergeExtraFrom(&src)
+		assert.Equal(t, []string{"A", "B"}, dst.ScrubEnvKeys)
+	})
+}
+
 func TestValuesLoader_Load_LocalOverridesGlobal(t *testing.T) {
 	tmpDir := t.TempDir()
 	globalConfig := filepath.Join(tmpDir, "global-config")

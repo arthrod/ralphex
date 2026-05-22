@@ -186,8 +186,19 @@ func stripFlag(args []string, flag string) []string {
 // preserveAPIKey is true; preserving it is required for users who authenticate Claude Code
 // via API key rather than OAuth/keychain. scrubKeys lists additional env var names to strip
 // from the child (e.g. inspector/oracle credentials the worker must not be able to read).
+//
+// preserveAPIKey takes precedence over scrubKeys: when preserving, ANTHROPIC_API_KEY is never
+// stripped even if it also appears in scrubKeys, so the documented passthrough guarantee holds
+// instead of being silently broken by an overlapping scrub_env_keys entry.
 func claudeChildEnv(env []string, preserveAPIKey bool, scrubKeys ...string) []string {
-	remove := append([]string{"CLAUDECODE"}, scrubKeys...)
+	remove := make([]string, 0, len(scrubKeys)+1)
+	remove = append(remove, "CLAUDECODE")
+	for _, k := range scrubKeys {
+		if preserveAPIKey && k == "ANTHROPIC_API_KEY" {
+			continue // preserve wins: don't let scrub_env_keys override the passthrough flag
+		}
+		remove = append(remove, k)
+	}
 	if !preserveAPIKey {
 		remove = append(remove, "ANTHROPIC_API_KEY")
 	}
