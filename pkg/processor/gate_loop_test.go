@@ -159,6 +159,7 @@ func TestRunOracle_AutoApproveAppliesWithoutInputCollector(t *testing.T) {
 	st, err := store.Get(1)
 	require.NoError(t, err)
 	assert.Equal(t, state.StatusPending, st.Status, "task reset to pending after auto-approved oracle")
+	assert.Equal(t, 0, st.AttemptCount, "attempts reset after auto-approved oracle, same as interactive approval")
 }
 
 func TestRunOracle_ApprovedAppliesFixAndResetsState(t *testing.T) {
