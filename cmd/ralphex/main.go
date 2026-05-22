@@ -51,6 +51,7 @@ type opts struct {
 	SkipFinalize            bool          `long:"skip-finalize" description:"skip finalize step even if enabled in config"`
 	PreserveAnthropicAPIKey bool          `long:"preserve-anthropic-api-key" description:"pass ANTHROPIC_API_KEY through to claude (for users authenticating Claude Code via API key rather than OAuth/keychain)"`
 	InspectorGate           bool          `long:"inspector-gate" description:"gate each task on a separately-credentialed inspector verdict instead of trusting the worker's self-completion"`
+	OracleAutoApprove       bool          `long:"oracle-auto-approve" description:"auto-approve inspector-gate oracle proposals without a prompt (unattended runs; weakens the human-in-the-loop guarantee)"`
 	Worktree                bool          `long:"worktree" description:"run in isolated git worktree"`
 	Branch                  string        `long:"branch" description:"override branch name for worktree/branch creation (default: derived from plan filename)"`
 	PlanDescription         string        `long:"plan" description:"create plan interactively (enter plan description)"`
@@ -136,6 +137,7 @@ type startupInfo struct {
 	MaxIterations           int
 	ProgressPath            string
 	PreserveAnthropicAPIKey bool // when true, surfaced in the banner so users can spot wrong-context runs before claude bills the wrong account
+	OracleAutoApprove       bool // when true (and the gate is active), surfaced so unattended auto-approval is visible before the run starts
 }
 
 // executePlanRequest holds parameters for plan execution.
@@ -554,6 +556,7 @@ func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 	}
 
 	// print startup info
+	gateActive := req.Config.InspectorGateEnabled || o.InspectorGate
 	printStartupInfo(startupInfo{
 		PlanFile:                req.PlanFile,
 		Branch:                  branch,
@@ -561,6 +564,7 @@ func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 		MaxIterations:           resolveMaxIterations(o.MaxIterations, req.Config),
 		ProgressPath:            plr.baseLog.Path(),
 		PreserveAnthropicAPIKey: req.Config.PreserveAnthropicAPIKey,
+		OracleAutoApprove:       gateActive && req.Config.OracleAutoApprove,
 	}, req.Colors)
 
 	// create and run the runner
@@ -928,6 +932,7 @@ func createRunner(req executePlanRequest, o opts, log processor.Logger, holder *
 		ReviewModel:           reviewModel,
 		InspectorGateEnabled:  req.Config.InspectorGateEnabled || o.InspectorGate,
 		MaxTaskAttempts:       req.Config.MaxTaskAttempts,
+		OracleAutoApprove:     req.Config.OracleAutoApprove,
 		AppConfig:             req.Config,
 	}, log, holder)
 	if req.GitSvc != nil {
@@ -961,6 +966,9 @@ func printStartupInfo(info startupInfo, colors *progress.Colors) {
 	displayMeta(colors, 0, info.PlanFile, info.Branch, info.ProgressPath)
 	if info.PreserveAnthropicAPIKey {
 		colors.Warn().Printf("auth: ANTHROPIC_API_KEY passthrough enabled\n")
+	}
+	if info.OracleAutoApprove {
+		colors.Warn().Printf("oracle: auto-approve enabled (plan edits applied without confirmation)\n")
 	}
 	colors.Info().Printf("\n")
 }
@@ -1288,6 +1296,9 @@ func applyCLIOverrides(o opts, cfg *config.Config) {
 	}
 	if o.PreserveAnthropicAPIKey {
 		cfg.PreserveAnthropicAPIKey = true
+	}
+	if o.OracleAutoApprove {
+		cfg.OracleAutoApprove = true
 	}
 	if o.Worktree {
 		cfg.WorktreeEnabled = true

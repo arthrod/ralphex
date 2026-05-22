@@ -81,6 +81,7 @@ type Config struct {
 
 	InspectorGateEnabled bool `json:"inspector_gate_enabled"` // when true, task phase uses the per-task credential-gated inspector loop
 	MaxTaskAttempts      int  `json:"max_task_attempts"`      // reject threshold before escalating a task to the oracle (0 = default 3)
+	OracleAutoApprove    bool `json:"oracle_auto_approve"`    // when true, oracle proposals are auto-approved (unattended gated runs)
 
 	MovePlanOnCompletion bool `json:"move_plan_on_completion"`
 
@@ -321,6 +322,7 @@ func loadConfigFromDirs(globalDir, localDir string) (*Config, error) {
 		PreserveAnthropicAPIKey: values.PreserveAnthropicAPIKey,
 		InspectorGateEnabled:    values.InspectorGateEnabled,
 		MaxTaskAttempts:         values.MaxTaskAttempts,
+		OracleAutoApprove:       values.OracleAutoApprove,
 		MovePlanOnCompletion:    values.MovePlanOnCompletion,
 		WorktreeEnabled:         values.WorktreeEnabled,
 		WorktreeEnabledSet:      values.WorktreeEnabledSet,

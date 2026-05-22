@@ -135,6 +135,33 @@ func TestRunTaskPhaseGated_RepeatedRejectEscalatesAndOracleDeclineAborts(t *test
 	assert.Contains(t, string(got), "- [ ] implement", "box must stay unchecked on reject")
 }
 
+func TestRunOracle_AutoApproveAppliesWithoutInputCollector(t *testing.T) {
+	r, planPath := newGatedRunner(t, "VERDICT: done") // verdict unused here
+	r.codex = &mocks.ExecutorMock{RunFunc: func(_ context.Context, _ string) executor.Result {
+		return executor.Result{Output: "OLD: implement\nNEW: build it unattended"}
+	}}
+	r.oracleAutoApprove = true
+	r.inputCollector = nil // unattended: no terminal available
+
+	store, err := r.openStateStore()
+	require.NoError(t, err)
+	defer func() { _ = store.Close() }()
+	require.NoError(t, store.Save(state.TaskState{Position: 1, Status: state.StatusNeedsRevision, AttemptCount: 3}))
+
+	resumed, err := r.runOracle(context.Background(), 1, store, "rejected repeatedly")
+	require.NoError(t, err)
+	assert.True(t, resumed, "auto-approve resumes the loop without a terminal")
+
+	got, err := os.ReadFile(planPath) //nolint:gosec // test plan path from t.TempDir
+	require.NoError(t, err)
+	assert.Contains(t, string(got), "build it unattended", "auto-approved substitution applied to plan")
+
+	st, err := store.Get(1)
+	require.NoError(t, err)
+	assert.Equal(t, state.StatusPending, st.Status, "task reset to pending after auto-approved oracle")
+	assert.Equal(t, 0, st.AttemptCount, "attempts reset after auto-approved oracle, same as interactive approval")
+}
+
 func TestRunOracle_ApprovedAppliesFixAndResetsState(t *testing.T) {
 	r, planPath := newGatedRunner(t, "VERDICT: done") // verdict unused here
 	r.codex = &mocks.ExecutorMock{RunFunc: func(_ context.Context, _ string) executor.Result {
