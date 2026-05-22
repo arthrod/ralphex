@@ -6,6 +6,7 @@ package inspector
 
 import (
 	"errors"
+	"fmt"
 	"regexp"
 	"strings"
 )

@@ -7,12 +7,19 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestApplySubstitution_ReplacesFirstOccurrence(t *testing.T) {
-	content := "use the FooBar API\nthen use the FooBar API again\n"
+func TestApplySubstitution_ReplacesUniqueOccurrence(t *testing.T) {
+	content := "use the FooBar API in the widget task\n"
 	got, err := ApplySubstitution(content, "FooBar", "FooBaz")
 	require.NoError(t, err)
-	assert.Equal(t, "use the FooBaz API\nthen use the FooBar API again\n", got,
-		"only the first occurrence is substituted")
+	assert.Equal(t, "use the FooBaz API in the widget task\n", got)
+}
+
+func TestApplySubstitution_AmbiguousMatchErrors(t *testing.T) {
+	// a non-unique OLD string is rejected: replacing the first of several could edit the wrong task.
+	content := "use the FooBar API\nthen use the FooBar API again\n"
+	_, err := ApplySubstitution(content, "FooBar", "FooBaz")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "ambiguous")
 }
 
 func TestApplySubstitution_NotFoundErrors(t *testing.T) {

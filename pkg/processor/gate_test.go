@@ -55,6 +55,7 @@ func TestApplyVerdict_RejectHittingThreshold_Escalates(t *testing.T) {
 	assert.Equal(t, state.StatusNeedsRevision, out.state.Status)
 	assert.Equal(t, 3, out.state.AttemptCount)
 	assert.Contains(t, out.plan, "STILL BROKEN")
+	assert.Equal(t, "STILL BROKEN", out.reason, "escalation carries the inspector's complaint to the oracle")
 }
 
 func TestApplyVerdict_Update_EscalatesWithoutCountingAttempt(t *testing.T) {
@@ -67,6 +68,7 @@ func TestApplyVerdict_Update_EscalatesWithoutCountingAttempt(t *testing.T) {
 	assert.True(t, out.escalate)
 	assert.Equal(t, state.StatusNeedsRevision, out.state.Status)
 	assert.Equal(t, 1, out.state.AttemptCount, "update is not the worker's fault; attempt count unchanged")
+	assert.Equal(t, "task references missing API", out.reason, "update verdict's explanation reaches the oracle")
 }
 
 func TestApplyVerdict_UnknownTaskErrors(t *testing.T) {

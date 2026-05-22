@@ -92,7 +92,7 @@ tool works — `external_review_tool = codex` uses Codex as the inspector instea
 | Setting | CLI flag | Default | Meaning |
 |---------|----------|---------|---------|
 | `inspector_gate_enabled` | `--inspector-gate` | `false` | Enable the per-task gate. |
-| `max_task_attempts` | — | `3` | Inspector rejections a task may accumulate before escalating to the oracle. |
+| `max_task_attempts` | — | `3` | Number of inspector rejections a task may accumulate before escalating to the oracle. |
 | `scrub_env_keys` | — | (empty) | Comma-separated env var names to strip from the worker subprocess. |
 | `external_review_tool` | `--external-review-tool` | `codex` | Tool used as the inspector and oracle engine (`custom`, `codex`, `none`). |
 | `custom_review_script` | `--custom-review-script` | — | Script path when `external_review_tool = custom`. |
@@ -108,7 +108,7 @@ out of a potentially-compromised worker's reach, list its env var names in `scru
 scrub_env_keys = UGABUGA_INSPECTOR_TOKEN, UGABUGA_ORACLE_TOKEN
 ```
 
-Those variables are removed from the worker (claude) subprocess environment while remaining available
+Those variables are removed from the worker (Claude) subprocess environment while remaining available
 to the parent and to the inspector/oracle subprocess. (`CLAUDECODE` is always stripped regardless, and
 `ANTHROPIC_API_KEY` is stripped unless `--preserve-anthropic-api-key` is set — see the main README.)
 
@@ -155,4 +155,4 @@ never silently changes nothing.
 
 - The oracle's approval step needs an interactive terminal; it can't run fully unattended.
 - The inspector, oracle, and gated-task prompts are built in code (not yet customizable prompt files).
-- Worktree mode and the state DB path interaction is not yet validated.
+- The interaction between worktree mode and the state DB path is not yet validated.

@@ -48,6 +48,16 @@ func TestParseProposal(t *testing.T) {
 			output:  "OLD:\nNEW: replacement",
 			wantErr: true,
 		},
+		{
+			name:    "multiple OLD lines are ambiguous and rejected",
+			output:  "OLD: first\nNEW: a\nOLD: second\nNEW: b",
+			wantErr: true,
+		},
+		{
+			name:    "multiple NEW lines are ambiguous and rejected",
+			output:  "OLD: only\nNEW: a\nNEW: b",
+			wantErr: true,
+		},
 	}
 
 	for _, tc := range tests {

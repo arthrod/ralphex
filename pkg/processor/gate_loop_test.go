@@ -24,11 +24,11 @@ func (s stubReviewer) Review(_ context.Context, _ string) (string, error) { retu
 
 // newGatedRunner builds a Runner wired for the inspector gate against a temp plan file and db,
 // with a worker that always proposes completion and an injectable inspector verdict.
-func newGatedRunner(t *testing.T, planBody, verdict string) (*Runner, string) {
+func newGatedRunner(t *testing.T, verdict string) (*Runner, string) {
 	t.Helper()
 	dir := t.TempDir()
 	planPath := filepath.Join(dir, "plan.md")
-	require.NoError(t, os.WriteFile(planPath, []byte(planBody), 0o600))
+	require.NoError(t, os.WriteFile(planPath, []byte(oneTaskPlan), 0o600))
 
 	worker := &mocks.ExecutorMock{
 		RunFunc: func(_ context.Context, _ string) executor.Result {
@@ -80,7 +80,7 @@ func TestRunTaskPhaseGated_NilReviewerReturnsError(t *testing.T) {
 }
 
 func TestRunTaskPhaseGated_DoneAcceptsAndCompletes(t *testing.T) {
-	r, planPath := newGatedRunner(t, oneTaskPlan, "VERDICT: done")
+	r, planPath := newGatedRunner(t, "VERDICT: done")
 
 	err := r.runTaskPhaseGated(context.Background())
 	require.NoError(t, err)
@@ -90,8 +90,34 @@ func TestRunTaskPhaseGated_DoneAcceptsAndCompletes(t *testing.T) {
 	assert.Contains(t, string(got), "- [x] implement", "parent should check the box on done verdict")
 }
 
+func TestRunTaskPhaseGated_PersistedNeedsRevisionRoutesToOracleFirst(t *testing.T) {
+	// simulate a restart: the store already holds the task as needs_revision (escalated, but the
+	// oracle never resolved it). the loop must route it to the oracle before re-running the worker.
+	r, planPath := newGatedRunner(t, "VERDICT: done")
+	r.codex = &mocks.ExecutorMock{RunFunc: func(_ context.Context, _ string) executor.Result {
+		return executor.Result{Output: "OLD: implement\nNEW: build it"}
+	}}
+	r.inputCollector = &mocks.InputCollectorMock{
+		AskQuestionFunc: func(_ context.Context, _ string, _ []string) (string, error) { return "Yes", nil },
+	}
+
+	store, err := r.openStateStore()
+	require.NoError(t, err)
+	require.NoError(t, store.Save(state.TaskState{Position: 1, Status: state.StatusNeedsRevision, AttemptCount: 3}))
+	require.NoError(t, store.Close())
+
+	err = r.runTaskPhaseGated(context.Background())
+	require.NoError(t, err)
+
+	got, err := os.ReadFile(planPath) //nolint:gosec // test plan path from t.TempDir
+	require.NoError(t, err)
+	// the oracle ran first (its substitution is in the plan); without the restart guard the worker
+	// would have run on the unresolved task and the oracle would never have applied this fix.
+	assert.Contains(t, string(got), "build it", "persisted needs_revision must route to the oracle before the worker")
+}
+
 func TestRunTaskPhaseGated_RepeatedRejectEscalatesAndOracleDeclineAborts(t *testing.T) {
-	r, planPath := newGatedRunner(t, oneTaskPlan, "VERDICT: reject | FIX THE THING")
+	r, planPath := newGatedRunner(t, "VERDICT: reject | FIX THE THING")
 	// give the runner an oracle engine and a user that declines the proposed fix.
 	r.codex = &mocks.ExecutorMock{RunFunc: func(_ context.Context, _ string) executor.Result {
 		return executor.Result{Output: "OLD: implement\nNEW: build it"}
@@ -110,7 +136,7 @@ func TestRunTaskPhaseGated_RepeatedRejectEscalatesAndOracleDeclineAborts(t *test
 }
 
 func TestRunOracle_ApprovedAppliesFixAndResetsState(t *testing.T) {
-	r, planPath := newGatedRunner(t, oneTaskPlan, "VERDICT: done") // verdict unused here
+	r, planPath := newGatedRunner(t, "VERDICT: done") // verdict unused here
 	r.codex = &mocks.ExecutorMock{RunFunc: func(_ context.Context, _ string) executor.Result {
 		return executor.Result{Output: "OLD: implement\nNEW: build the thing"}
 	}}
@@ -122,7 +148,7 @@ func TestRunOracle_ApprovedAppliesFixAndResetsState(t *testing.T) {
 	defer func() { _ = store.Close() }()
 	require.NoError(t, store.Save(state.TaskState{Position: 1, Status: state.StatusNeedsRevision, AttemptCount: 3}))
 
-	resumed, err := r.runOracle(context.Background(), 1, store)
+	resumed, err := r.runOracle(context.Background(), 1, store, "rejected repeatedly")
 	require.NoError(t, err)
 	assert.True(t, resumed, "approved oracle fix resumes the loop")
 

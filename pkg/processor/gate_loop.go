@@ -77,6 +77,18 @@ func (r *Runner) runTaskPhaseGated(ctx context.Context) error {
 			return fmt.Errorf("read task %d state: %w", taskNum, err)
 		}
 
+		// a task persisted as needs_revision (escalated, but the oracle never resolved it — e.g. the
+		// process was interrupted after escalation) must be routed to the oracle BEFORE the worker
+		// runs again. otherwise a restart would re-dispatch an unresolved escalated task to the worker,
+		// skipping the escalation state machine.
+		if st.Status == state.StatusNeedsRevision {
+			r.log.Print("task %d is awaiting oracle revision; resolving before re-running the worker", taskNum)
+			if eerr := r.resolveEscalation(ctx, taskNum, store, "previously escalated to the oracle for revision"); eerr != nil {
+				return eerr
+			}
+			continue // oracle reset the task to pending; re-select and run the worker
+		}
+
 		preHash, err := r.git.HeadHash()
 		if err != nil {
 			return fmt.Errorf("capture pre-task HEAD: %w", err)
@@ -99,8 +111,8 @@ func (r *Runner) runTaskPhaseGated(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		if err := os.WriteFile(r.resolvePlanFilePath(), []byte(outcome.plan), 0o600); err != nil {
-			return fmt.Errorf("write plan after verdict: %w", err)
+		if err := writePlanPreservingMode(r.resolvePlanFilePath(), []byte(outcome.plan)); err != nil {
+			return err
 		}
 		if err := store.Save(outcome.state); err != nil {
 			return fmt.Errorf("save task %d state: %w", taskNum, err)
@@ -108,12 +120,8 @@ func (r *Runner) runTaskPhaseGated(ctx context.Context) error {
 
 		if outcome.escalate {
 			r.log.Print("task %d escalated to oracle after %d attempt(s)", taskNum, outcome.state.AttemptCount)
-			resumed, oerr := r.runOracle(ctx, taskNum, store)
-			if oerr != nil {
-				return oerr
-			}
-			if !resumed {
-				return ErrUserAborted
+			if eerr := r.resolveEscalation(ctx, taskNum, store, outcome.reason); eerr != nil {
+				return eerr
 			}
 			// oracle applied an approved fix and reset the task to pending: loop re-runs it.
 		}
@@ -194,8 +202,22 @@ func (r *Runner) resetTaskCheckboxes(taskNum int) error {
 	if reset == string(content) {
 		return nil
 	}
-	if err := os.WriteFile(path, []byte(reset), 0o600); err != nil {
-		return fmt.Errorf("write plan after resetting task %d checkboxes: %w", taskNum, err)
+	if err := writePlanPreservingMode(path, []byte(reset)); err != nil {
+		return fmt.Errorf("reset task %d checkboxes: %w", taskNum, err)
+	}
+	return nil
+}
+
+// writePlanPreservingMode writes content to the plan path, preserving the file's existing
+// permission bits when it already exists (defaulting to 0600 for a new file). This avoids silently
+// resetting a repo- or user-chosen mode every time the gate rewrites the plan.
+func writePlanPreservingMode(path string, content []byte) error {
+	mode := os.FileMode(0o600)
+	if fi, statErr := os.Stat(path); statErr == nil {
+		mode = fi.Mode().Perm()
+	}
+	if err := os.WriteFile(path, content, mode); err != nil {
+		return fmt.Errorf("write plan %s: %w", path, err)
 	}
 	return nil
 }
@@ -227,8 +249,13 @@ func (r *Runner) planTaskTitle(taskNum int) string {
 	return p.Tasks[taskNum-1].Title
 }
 
-// planTaskCriteria returns the task's checklist items rendered as markdown checkboxes — the
-// acceptance criteria the inspector judges the diff against. Empty if the task is unavailable.
+// planTaskCriteria returns the task's checklist items as the acceptance criteria the inspector
+// judges the diff against. Empty if the task is unavailable.
+//
+// The checked/unchecked state is deliberately NOT rendered: a worker could otherwise tick the
+// boxes itself to make incomplete work look satisfied and steer the inspector. The inspector must
+// judge the diff against what the task requires, so every item is presented as an unchecked
+// requirement regardless of the (worker-mutable) on-disk mark.
 func (r *Runner) planTaskCriteria(taskNum int) string {
 	p, err := plan.ParsePlanFile(r.resolvePlanFilePath())
 	if err != nil || taskNum < 1 || taskNum > len(p.Tasks) {
@@ -236,11 +263,7 @@ func (r *Runner) planTaskCriteria(taskNum int) string {
 	}
 	var b strings.Builder
 	for _, cb := range p.Tasks[taskNum-1].Checkboxes {
-		mark := " "
-		if cb.Checked {
-			mark = "x"
-		}
-		fmt.Fprintf(&b, "- [%s] %s\n", mark, cb.Text)
+		fmt.Fprintf(&b, "- [ ] %s\n", cb.Text)
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
@@ -258,10 +281,25 @@ func buildGatedTaskPrompt() string {
 		status.PeasantTired + "\n"
 }
 
+// resolveEscalation runs the oracle for an escalated task and maps its outcome to a loop-control
+// error: nil when the task was resolved (caller re-runs it), ErrUserAborted when the user declined
+// the proposal, or the oracle error otherwise. It keeps the two escalation call sites in the gated
+// loop small.
+func (r *Runner) resolveEscalation(ctx context.Context, taskNum int, store *state.Store, reason string) error {
+	resumed, err := r.runOracle(ctx, taskNum, store, reason)
+	if err != nil {
+		return err
+	}
+	if !resumed {
+		return ErrUserAborted
+	}
+	return nil
+}
+
 // runOracle resolves an escalated task: it proposes a substitution via the external tool, asks the
 // user to approve it, and on approval applies it to the plan and resets the task to pending so the
 // loop retries it. Returns resumed=false when the user declines (the run should abort).
-func (r *Runner) runOracle(ctx context.Context, taskNum int, store *state.Store) (resumed bool, err error) {
+func (r *Runner) runOracle(ctx context.Context, taskNum int, store *state.Store, reason string) (resumed bool, err error) {
 	exec := r.externalExecutor()
 	if exec == nil {
 		return false, errors.New("oracle requires an external review tool (codex/custom) but none is configured")
@@ -275,8 +313,11 @@ func (r *Runner) runOracle(ctx context.Context, taskNum int, store *state.Store)
 		return false, fmt.Errorf("read plan for oracle: %w", err)
 	}
 
+	if strings.TrimSpace(reason) == "" {
+		reason = "rejected repeatedly by the inspector"
+	}
 	out, err := oracle.Resolve(ctx, executorProposer{exec: exec}, inputApprover{ic: r.inputCollector, ctx: ctx},
-		string(planContent), r.planTaskTitle(taskNum), "rejected repeatedly by the inspector")
+		string(planContent), r.planTaskTitle(taskNum), reason)
 	if err != nil {
 		return false, fmt.Errorf("oracle: %w", err)
 	}
@@ -285,8 +326,8 @@ func (r *Runner) runOracle(ctx context.Context, taskNum int, store *state.Store)
 		return false, nil
 	}
 
-	if werr := os.WriteFile(r.resolvePlanFilePath(), []byte(out.Plan), 0o600); werr != nil {
-		return false, fmt.Errorf("write plan after oracle: %w", werr)
+	if werr := writePlanPreservingMode(r.resolvePlanFilePath(), []byte(out.Plan)); werr != nil {
+		return false, werr
 	}
 	st, err := store.Get(taskNum)
 	if err != nil {

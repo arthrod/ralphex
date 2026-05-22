@@ -5,6 +5,7 @@ package oracle
 
 import (
 	"errors"
+	"fmt"
 	"regexp"
 	"strings"
 )
@@ -17,19 +18,27 @@ var (
 
 // parseProposal extracts a single OLD/NEW substring substitution proposed by the oracle model.
 // OLD must be non-empty (there must be something to match); NEW may be empty (a deletion). Other
-// surrounding text is ignored. Returns an error if either line is missing or OLD is empty.
+// surrounding text is ignored. Because the proposal drives a literal plan edit, ambiguity is
+// rejected rather than guessed: more than one OLD: or NEW: line is an error, as is a missing line
+// or an empty OLD string — so the oracle never silently applies an unintended substitution.
 func parseProposal(output string) (oldStr, newStr string, err error) {
-	oldMatch := oldLineRe.FindStringSubmatch(output)
-	if oldMatch == nil {
+	oldMatches := oldLineRe.FindAllStringSubmatch(output, -1)
+	if len(oldMatches) == 0 {
 		return "", "", errors.New("no OLD: line found in oracle proposal")
 	}
-	newMatch := newLineRe.FindStringSubmatch(output)
-	if newMatch == nil {
+	if len(oldMatches) > 1 {
+		return "", "", fmt.Errorf("oracle proposal has %d OLD: lines; it must propose exactly one substitution", len(oldMatches))
+	}
+	newMatches := newLineRe.FindAllStringSubmatch(output, -1)
+	if len(newMatches) == 0 {
 		return "", "", errors.New("no NEW: line found in oracle proposal")
 	}
-	oldStr = strings.TrimSpace(oldMatch[1])
+	if len(newMatches) > 1 {
+		return "", "", fmt.Errorf("oracle proposal has %d NEW: lines; it must propose exactly one substitution", len(newMatches))
+	}
+	oldStr = strings.TrimSpace(oldMatches[0][1])
 	if oldStr == "" {
 		return "", "", errors.New("oracle proposal has an empty OLD string")
 	}
-	return oldStr, strings.TrimSpace(newMatch[1]), nil
+	return oldStr, strings.TrimSpace(newMatches[0][1]), nil
 }
