@@ -5,6 +5,7 @@
 package inspector
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -36,7 +37,7 @@ var verdictPattern = regexp.MustCompile(`(?im)^\s*VERDICT:\s+(done|reject|update
 func parseVerdict(output string) (Verdict, error) {
 	matches := verdictPattern.FindAllStringSubmatch(output, -1)
 	if len(matches) == 0 {
-		return Verdict{}, fmt.Errorf("no well-formed VERDICT line found in inspector output")
+		return Verdict{}, errors.New("no well-formed VERDICT line found in inspector output")
 	}
 	m := matches[len(matches)-1]
 	kind := VerdictKind(strings.ToLower(m[1]))

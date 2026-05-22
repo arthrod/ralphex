@@ -15,6 +15,7 @@ type verdictOutcome struct {
 	state    state.TaskState // new state to persist
 	accepted bool            // task is done; advance to the next task
 	escalate bool            // route to the oracle (needs_revision)
+	reason   string          // escalation reason passed to the oracle (the inspector's payload) when escalate is true
 }
 
 // applyVerdict turns an inspector verdict into a plan mutation and a state transition. It is the
@@ -48,6 +49,7 @@ func applyVerdict(planContent string, taskNum int, cur state.TaskState, v inspec
 		if out.state.AttemptCount >= maxAttempts {
 			out.state.Status = state.StatusNeedsRevision
 			out.escalate = true
+			out.reason = v.Payload // carry the latest complaint into the oracle prompt
 		} else {
 			out.state.Status = state.StatusRejected
 		}
@@ -55,9 +57,11 @@ func applyVerdict(planContent string, taskNum int, cur state.TaskState, v inspec
 	case inspector.VerdictUpdate:
 		// update is not the worker's fault: attempts unchanged, no yelling. the oracle handles the
 		// spec from here. the loop only ever passes a live nextPlanTaskPosition, so no plan mutation
-		// (and thus no task-existence check) is needed.
+		// (and thus no task-existence check) is needed. the inspector's explanation is the most
+		// useful reason for the oracle, so carry it through.
 		out.state.Status = state.StatusNeedsRevision
 		out.escalate = true
+		out.reason = v.Payload
 
 	default:
 		return verdictOutcome{}, fmt.Errorf("unknown verdict kind %q", v.Kind)

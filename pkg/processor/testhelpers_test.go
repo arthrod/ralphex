@@ -19,7 +19,7 @@ func testAppConfig(t *testing.T) *config.Config {
 }
 
 // newMockLogger creates a moq-generated logger mock with no-op implementations.
-func newMockLogger(path string) *mocks.LoggerMock { //nolint:unparam // path is used by callers
+func newMockLogger(path string) *mocks.LoggerMock {
 	return &mocks.LoggerMock{
 		PrintFunc:          func(_ string, _ ...any) {},
 		PrintRawFunc:       func(_ string, _ ...any) {},

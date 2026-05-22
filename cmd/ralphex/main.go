@@ -933,6 +933,10 @@ func createRunner(req executePlanRequest, o opts, log processor.Logger, holder *
 	if req.GitSvc != nil {
 		r.SetGitChecker(req.GitSvc)
 	}
+	// the inspector gate's oracle escalation needs interactive approval; wire a terminal collector.
+	if req.Config.InspectorGateEnabled || o.InspectorGate {
+		r.SetInputCollector(input.NewTerminalCollector(o.NoColor))
+	}
 	return r
 }
 
