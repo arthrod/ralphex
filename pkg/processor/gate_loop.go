@@ -300,8 +300,10 @@ func (r *Runner) runOracle(ctx context.Context, taskNum int, store *state.Store,
 	if exec == nil {
 		return false, errors.New("oracle requires an external review tool (codex/custom) but none is configured")
 	}
-	if r.inputCollector == nil {
-		return false, errors.New("oracle requires interactive input but no input collector is set")
+
+	approver, err := r.oracleApprover(ctx)
+	if err != nil {
+		return false, err
 	}
 
 	planContent, err := os.ReadFile(r.resolvePlanFilePath())
@@ -312,8 +314,7 @@ func (r *Runner) runOracle(ctx context.Context, taskNum int, store *state.Store,
 	// buildOraclePrompt defaults an empty reason, so the threaded escalation reason (inspector
 	// payload, or the restart sentinel) flows through to the customizable oracle template.
 	oraclePrompt := r.buildOraclePrompt(r.planTaskTitle(taskNum), reason, string(planContent))
-	out, err := oracle.Resolve(ctx, executorProposer{exec: exec}, inputApprover{ic: r.inputCollector, ctx: ctx},
-		oraclePrompt, string(planContent))
+	out, err := oracle.Resolve(ctx, executorProposer{exec: exec}, approver, oraclePrompt, string(planContent))
 	if err != nil {
 		return false, fmt.Errorf("oracle: %w", err)
 	}
@@ -335,6 +336,31 @@ func (r *Runner) runOracle(ctx context.Context, taskNum int, store *state.Store,
 		return false, fmt.Errorf("reset task %d state after oracle: %w", taskNum, err)
 	}
 	r.log.Print("oracle fix applied to task %d; retrying", taskNum)
+	return true, nil
+}
+
+// oracleApprover selects how an oracle proposal is approved. With --oracle-auto-approve it returns
+// an autoApprover so gated runs can proceed unattended (no terminal needed); otherwise it requires
+// an interactive input collector and returns the y/N prompt approver.
+func (r *Runner) oracleApprover(ctx context.Context) (oracle.Approver, error) {
+	if r.oracleAutoApprove {
+		return autoApprover{log: r.log}, nil
+	}
+	if r.inputCollector == nil {
+		return nil, errors.New("oracle requires interactive input but no input collector is set (enable --oracle-auto-approve for unattended runs)")
+	}
+	return inputApprover{ic: r.inputCollector, ctx: ctx}, nil
+}
+
+// autoApprover approves every oracle proposal without prompting. It is used for unattended runs
+// (--oracle-auto-approve) and deliberately weakens the gate's human-in-the-loop guarantee, so each
+// applied edit is logged loudly with its OLD/NEW text for the audit trail.
+type autoApprover struct{ log Logger }
+
+func (a autoApprover) Approve(oldStr, newStr string) (bool, error) {
+	a.log.Print("oracle auto-approve enabled: applying proposed plan edit WITHOUT confirmation")
+	a.log.Print("  OLD: %s", oldStr)
+	a.log.Print("  NEW: %s", newStr)
 	return true, nil
 }
 

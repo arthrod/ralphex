@@ -62,6 +62,7 @@ type Config struct {
 	DefaultBranch         string         // default branch name (detected from repo)
 	InspectorGateEnabled  bool           // when true, task phase uses the per-task credential-gated inspector loop
 	MaxTaskAttempts       int            // reject threshold before escalating a task to the oracle (0 = default)
+	OracleAutoApprove     bool           // when true, oracle proposals are auto-approved (unattended gated runs)
 	AppConfig             *config.Config // full application config (for executors and prompts)
 }
 
@@ -132,6 +133,7 @@ type Runner struct {
 	reviewer             inspector.Reviewer // external-review tool adapted as the inspector engine
 	maxTaskAttempts      int                // reject threshold before escalating to the oracle
 	inspectorStateDB     string             // sqlite path for per-task state (empty = default under .ralphex/)
+	oracleAutoApprove    bool               // when true, oracle proposals are applied without interactive approval
 }
 
 // New creates a new Runner with the given configuration and shared phase holder.
@@ -285,6 +287,7 @@ func NewWithExecutors(cfg Config, log Logger, execs Executors, holder *status.Ph
 		inspectorGateEnabled: cfg.InspectorGateEnabled,
 		reviewer:             reviewer,
 		maxTaskAttempts:      cfg.MaxTaskAttempts,
+		oracleAutoApprove:    cfg.OracleAutoApprove,
 	}
 }
 

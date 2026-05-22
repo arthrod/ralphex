@@ -132,6 +132,14 @@ external_review_tool = codex
 # default: 3
 # max_task_attempts = 3
 
+# oracle_auto_approve: when true, oracle escalation proposals are applied WITHOUT
+# interactive confirmation, so a gated run can proceed fully unattended (e.g. in
+# CI). This weakens the gate's human-in-the-loop guarantee — the oracle's plan
+# edits are trusted automatically — so leave it off unless you intend that. Each
+# auto-applied edit is logged with its OLD/NEW text. CLI flag: --oracle-auto-approve.
+# default: false
+# oracle_auto_approve = false
+
 # ------------------------------------------------------------------------------
 # plan move behavior
 # ------------------------------------------------------------------------------

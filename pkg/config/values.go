@@ -56,6 +56,8 @@ type Values struct {
 	InspectorGateEnabledSet    bool // tracks if inspector_gate_enabled was explicitly set
 	MaxTaskAttempts            int  // reject threshold before escalating a task to the oracle (0 = default 3)
 	MaxTaskAttemptsSet         bool // tracks if max_task_attempts was explicitly set
+	OracleAutoApprove          bool
+	OracleAutoApproveSet       bool // tracks if oracle_auto_approve was explicitly set
 	MovePlanOnCompletion       bool
 	MovePlanOnCompletionSet    bool // tracks if move_plan_on_completion was explicitly set
 	WorktreeEnabled            bool
@@ -333,6 +335,14 @@ func (vl *valuesLoader) parseValuesFromBytes(data []byte) (Values, error) {
 		values.MaxTaskAttempts = val
 		values.MaxTaskAttemptsSet = true
 	}
+	if key, err := section.GetKey("oracle_auto_approve"); err == nil {
+		val, boolErr := key.Bool()
+		if boolErr != nil {
+			return Values{}, fmt.Errorf("invalid oracle_auto_approve: %w", boolErr)
+		}
+		values.OracleAutoApprove = val
+		values.OracleAutoApproveSet = true
+	}
 
 	// move plan on completion
 	if key, err := section.GetKey("move_plan_on_completion"); err == nil {
@@ -536,6 +546,23 @@ func (dst *Values) mergeExecutionFrom(src *Values) {
 	}
 }
 
+// mergeGateFrom merges the inspector-gate configuration fields from src into dst, kept separate so
+// mergeExtraFrom stays under the cyclomatic-complexity budget as gate options grow.
+func (dst *Values) mergeGateFrom(src *Values) {
+	if src.InspectorGateEnabledSet {
+		dst.InspectorGateEnabled = src.InspectorGateEnabled
+		dst.InspectorGateEnabledSet = true
+	}
+	if src.MaxTaskAttemptsSet {
+		dst.MaxTaskAttempts = src.MaxTaskAttempts
+		dst.MaxTaskAttemptsSet = true
+	}
+	if src.OracleAutoApproveSet {
+		dst.OracleAutoApprove = src.OracleAutoApprove
+		dst.OracleAutoApproveSet = true
+	}
+}
+
 // mergeExtraFrom merges feature flags, paths, error/limit patterns, and wait settings from src into dst.
 // called from mergeFrom to manage cyclomatic complexity.
 func (dst *Values) mergeExtraFrom(src *Values) {
@@ -547,14 +574,7 @@ func (dst *Values) mergeExtraFrom(src *Values) {
 		dst.PreserveAnthropicAPIKey = src.PreserveAnthropicAPIKey
 		dst.PreserveAnthropicAPIKeySet = true
 	}
-	if src.InspectorGateEnabledSet {
-		dst.InspectorGateEnabled = src.InspectorGateEnabled
-		dst.InspectorGateEnabledSet = true
-	}
-	if src.MaxTaskAttemptsSet {
-		dst.MaxTaskAttempts = src.MaxTaskAttempts
-		dst.MaxTaskAttemptsSet = true
-	}
+	dst.mergeGateFrom(src)
 	if src.MovePlanOnCompletionSet {
 		dst.MovePlanOnCompletion = src.MovePlanOnCompletion
 		dst.MovePlanOnCompletionSet = true

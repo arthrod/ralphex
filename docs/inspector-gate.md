@@ -96,8 +96,14 @@ tool works — `external_review_tool = codex` uses Codex as the inspector instea
 | `scrub_env_keys` | — | (empty) | Comma-separated env var names to strip from the worker subprocess. |
 | `external_review_tool` | `--external-review-tool` | `codex` | Tool used as the inspector and oracle engine (`custom`, `codex`, `none`). |
 | `custom_review_script` | `--custom-review-script` | — | Script path when `external_review_tool = custom`. |
+| `oracle_auto_approve` | `--oracle-auto-approve` | `false` | Apply oracle proposals without prompting (unattended runs). |
 
-The oracle requires interactive input for approval, so gated runs must have a terminal available.
+By default the oracle requires interactive input for approval, so a gated run normally needs a
+terminal. To run fully unattended (e.g. in CI), set `--oracle-auto-approve` (or
+`oracle_auto_approve = true`): oracle proposals are then applied without confirmation. This trades
+away the gate's human-in-the-loop guarantee — the oracle's plan edits are trusted automatically — so
+enable it deliberately. Each auto-applied edit is logged with its OLD/NEW text, and the startup
+banner shows `oracle: auto-approve enabled` so an unattended run is never silent about it.
 
 ## Credential isolation
 
@@ -170,5 +176,4 @@ variables (`{{PLAN_FILE}}`, `{{DEFAULT_BRANCH}}`, etc.) are also expanded in all
 
 ## Limitations
 
-- The oracle's approval step needs an interactive terminal; it can't run fully unattended.
 - The interaction between worktree mode and the state DB path is not yet validated.

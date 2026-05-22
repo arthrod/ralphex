@@ -196,6 +196,36 @@ func TestValues_mergeExtraFrom_MaxTaskAttempts(t *testing.T) {
 	})
 }
 
+func TestValuesLoader_Load_OracleAutoApprove(t *testing.T) {
+	tmpDir := t.TempDir()
+	globalConfig := filepath.Join(tmpDir, "config")
+
+	require.NoError(t, os.WriteFile(globalConfig, []byte("oracle_auto_approve = true\n"), 0o600))
+
+	loader := newValuesLoader(defaultsFS)
+	values, err := loader.Load("", globalConfig)
+	require.NoError(t, err)
+
+	assert.True(t, values.OracleAutoApprove)
+	assert.True(t, values.OracleAutoApproveSet)
+}
+
+func TestValues_mergeFrom_OracleAutoApprove(t *testing.T) {
+	t.Run("set src overrides unset dst", func(t *testing.T) {
+		dst := Values{OracleAutoApprove: false, OracleAutoApproveSet: false}
+		src := Values{OracleAutoApprove: true, OracleAutoApproveSet: true}
+		dst.mergeFrom(&src)
+		assert.True(t, dst.OracleAutoApprove)
+		assert.True(t, dst.OracleAutoApproveSet)
+	})
+	t.Run("unset src leaves dst untouched", func(t *testing.T) {
+		dst := Values{OracleAutoApprove: true, OracleAutoApproveSet: true}
+		src := Values{OracleAutoApprove: false, OracleAutoApproveSet: false}
+		dst.mergeFrom(&src)
+		assert.True(t, dst.OracleAutoApprove, "an unset local value must not clobber a set global one")
+	})
+}
+
 func TestValuesLoader_Load_LocalOverridesGlobal(t *testing.T) {
 	tmpDir := t.TempDir()
 	globalConfig := filepath.Join(tmpDir, "global-config")
