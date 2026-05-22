@@ -3,6 +3,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -370,6 +372,9 @@ func selectAndExecutePlan(ctx context.Context, o opts, req executePlanRequest, s
 
 // getCurrentBranch returns the current git branch name or "unknown" if unavailable.
 func getCurrentBranch(gitSvc *git.Service) string {
+	if gitSvc == nil {
+		return "unknown"
+	}
 	branch, err := gitSvc.CurrentBranch()
 	if err != nil || branch == "" {
 		return "unknown"
@@ -898,18 +903,30 @@ func sanitizeBranchForFilename(branch string) string {
 
 // inspectorStateDBPath returns the absolute path to the inspector gate's per-task state DB.
 // it lives under the MAIN repo's .ralphex/ so it survives worktree teardown and a later restart,
-// and is namespaced by branch so parallel worktrees running different plans never collide on task
-// positions. mainRoot is the main repository root (not the worktree). a blank result falls back to
-// the runner's CWD-relative default.
-func inspectorStateDBPath(mainRoot, branch string) string {
+// and is namespaced so parallel worktrees running different plans never collide on task positions.
+// mainRoot is the main repository root (not the worktree).
+//
+// The namespace is derived from the branch when known, falling back to the plan file when branch
+// detection failed (detached HEAD, transient git error) so distinct runs still get distinct files.
+// A short hash of the raw identifier is appended, so two identifiers that sanitize to the same
+// readable fragment (e.g. "feature/foo" vs "feature-foo") never share a DB. A blank result (no
+// mainRoot, or neither branch nor plan available) falls back to the runner's CWD-relative default.
+func inspectorStateDBPath(mainRoot, branch, planFile string) string {
 	if mainRoot == "" {
 		return ""
 	}
-	name := "inspector-state"
-	if frag := sanitizeBranchForFilename(branch); frag != "" {
-		name += "-" + frag
+	// pick the namespace identity: prefer the branch, fall back to the plan file.
+	ident, frag := branch, sanitizeBranchForFilename(branch)
+	if frag == "" && planFile != "" {
+		ident = planFile
+		frag = sanitizeBranchForFilename(filepath.Base(planFile))
 	}
-	return filepath.Join(mainRoot, ".ralphex", name+".db")
+	if frag == "" {
+		return filepath.Join(mainRoot, ".ralphex", "inspector-state.db")
+	}
+	sum := sha256.Sum256([]byte(ident))
+	name := fmt.Sprintf("inspector-state-%s-%s.db", frag, hex.EncodeToString(sum[:])[:8])
+	return filepath.Join(mainRoot, ".ralphex", name)
 }
 
 // createRunner creates a processor.Runner with the given configuration.
@@ -954,7 +971,7 @@ func createRunner(req executePlanRequest, o opts, log processor.Logger, holder *
 			mainSvc = req.MainGitSvc
 		}
 		if mainSvc != nil {
-			stateDB = inspectorStateDBPath(mainSvc.Root(), getCurrentBranch(req.GitSvc))
+			stateDB = inspectorStateDBPath(mainSvc.Root(), getCurrentBranch(req.GitSvc), req.PlanFile)
 		}
 	}
 

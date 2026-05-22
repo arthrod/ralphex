@@ -141,12 +141,30 @@ func TestNewWithExecutors_WiresInspectorStateDB(t *testing.T) {
 	cfg := Config{InspectorGateEnabled: true, InspectorStateDB: dbPath}
 	r := NewWithExecutors(cfg, newMockLogger("progress.txt"), Executors{}, &status.PhaseHolder{})
 
+	// the Config value must be wired onto the Runner field independently of openStateStore.
+	assert.Equal(t, dbPath, r.inspectorStateDB, "InspectorStateDB must be wired through to the Runner")
+
 	store, err := r.openStateStore()
 	require.NoError(t, err)
 	defer func() { _ = store.Close() }()
 
 	// the store must open at the configured path (creating parent dirs), not the CWD default.
 	assert.FileExists(t, dbPath, "openStateStore must honor the configured InspectorStateDB path")
+}
+
+func TestOpenStateStore_DefaultsToCWDWhenUnset(t *testing.T) {
+	// gate enabled but no explicit InspectorStateDB: openStateStore falls back to the CWD-relative
+	// default under .ralphex/. run in a temp CWD so the default lands there, not the real repo.
+	dir := t.TempDir()
+	t.Chdir(dir)
+	cfg := Config{InspectorGateEnabled: true}
+	r := NewWithExecutors(cfg, newMockLogger("progress.txt"), Executors{}, &status.PhaseHolder{})
+	require.Empty(t, r.inspectorStateDB, "no configured path")
+
+	store, err := r.openStateStore()
+	require.NoError(t, err)
+	defer func() { _ = store.Close() }()
+	assert.FileExists(t, filepath.Join(dir, ".ralphex", "inspector-state.db"), "falls back to the CWD default")
 }
 
 func TestRunOracle_AutoApproveAppliesWithoutInputCollector(t *testing.T) {

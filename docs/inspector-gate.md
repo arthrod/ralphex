@@ -57,9 +57,10 @@ With the gate enabled, the task phase runs **one task per worker invocation**:
 
 Per-task attempt counts and statuses are persisted in a SQLite store under the repository's
 `.ralphex/` directory, so the gate survives restarts. The file is namespaced by branch
-(`.ralphex/inspector-state-<branch>.db`) and, in worktree mode, lives in the **main** repository
-rather than the worktree — so it outlives worktree teardown and a later restart resumes where it
-left off, and parallel worktrees running different plans never collide on task positions.
+(`.ralphex/inspector-state-<branch>-<hash>.db`, falling back to the plan file when the branch is
+unknown) and, in worktree mode, lives in the **main** repository rather than the worktree — so it
+outlives worktree teardown and a later restart resumes where it left off, and parallel worktrees
+running different plans never collide on task positions.
 
 The gate applies to the task phase of `--inspector-gate` runs (full and tasks-only modes). The
 existing post-task code-review phases are unchanged.
