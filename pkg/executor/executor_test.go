@@ -603,6 +603,71 @@ func TestClaudeChildEnv(t *testing.T) {
 	}
 }
 
+func TestClaudeChildEnv_ScrubsConfiguredKeys(t *testing.T) {
+	tests := []struct {
+		name           string
+		env            []string
+		preserveAPIKey bool
+		scrubKeys      []string
+		want           []string
+	}{
+		{
+			name:      "scrubs a configured token alongside CLAUDECODE",
+			env:       []string{"PATH=/usr/bin", "CLAUDECODE=1", "UGABUGA_INSPECTOR_TOKEN=secret123", "HOME=/home/user"},
+			scrubKeys: []string{"UGABUGA_INSPECTOR_TOKEN"},
+			want:      []string{"PATH=/usr/bin", "HOME=/home/user"},
+		},
+		{
+			name:      "scrubs multiple configured keys",
+			env:       []string{"UGABUGA_INSPECTOR_TOKEN=a", "UGABUGA_ORACLE_TOKEN=b", "KEEP=1", "CLAUDECODE=1"},
+			scrubKeys: []string{"UGABUGA_INSPECTOR_TOKEN", "UGABUGA_ORACLE_TOKEN"},
+			want:      []string{"KEEP=1"},
+		},
+		{
+			name:           "preserve api key still scrubs configured keys",
+			env:            []string{"ANTHROPIC_API_KEY=secret", "UGABUGA_INSPECTOR_TOKEN=tok", "CLAUDECODE=1", "KEEP=1"},
+			preserveAPIKey: true,
+			scrubKeys:      []string{"UGABUGA_INSPECTOR_TOKEN"},
+			want:           []string{"ANTHROPIC_API_KEY=secret", "KEEP=1"},
+		},
+		{
+			// preserve must win over an overlapping scrub_env_keys entry, or the documented
+			// passthrough guarantee would be silently broken.
+			name:           "preserve api key wins over scrubbing ANTHROPIC_API_KEY",
+			env:            []string{"ANTHROPIC_API_KEY=secret", "UGABUGA_INSPECTOR_TOKEN=tok", "CLAUDECODE=1", "KEEP=1"},
+			preserveAPIKey: true,
+			scrubKeys:      []string{"ANTHROPIC_API_KEY", "UGABUGA_INSPECTOR_TOKEN"},
+			want:           []string{"ANTHROPIC_API_KEY=secret", "KEEP=1"},
+		},
+		{
+			name:           "without preserve, scrubbing ANTHROPIC_API_KEY removes it",
+			env:            []string{"ANTHROPIC_API_KEY=secret", "CLAUDECODE=1", "KEEP=1"},
+			preserveAPIKey: false,
+			scrubKeys:      []string{"ANTHROPIC_API_KEY"},
+			want:           []string{"KEEP=1"},
+		},
+		{
+			name:      "no configured keys behaves like default",
+			env:       []string{"PATH=/usr/bin", "CLAUDECODE=1"},
+			scrubKeys: nil,
+			want:      []string{"PATH=/usr/bin"},
+		},
+		{
+			name:      "partial key match not scrubbed",
+			env:       []string{"UGABUGA_INSPECTOR_TOKEN_OLD=old", "UGABUGA_INSPECTOR_TOKEN=new", "CLAUDECODE=1"},
+			scrubKeys: []string{"UGABUGA_INSPECTOR_TOKEN"},
+			want:      []string{"UGABUGA_INSPECTOR_TOKEN_OLD=old"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := claudeChildEnv(tc.env, tc.preserveAPIKey, tc.scrubKeys...)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
 func TestClaudeExecutor_parseStream_largeLines(t *testing.T) {
 	// test that lines of arbitrary length are handled without limit
 
@@ -1071,6 +1136,44 @@ func TestHelperProcessStreamJSON(t *testing.T) {
 	fmt.Println()
 	fmt.Println(`{"type":"result","result":""}`)
 	os.Exit(0)
+}
+
+// TestHelperProcessEnv is not a real test — used as a subprocess by
+// TestClaudeExecutor_Run_RealRunner_ScrubsEnvKey. It reports selected env vars from its
+// own (child) environment back through a stream-json event so parseStream can capture them.
+func TestHelperProcessEnv(t *testing.T) {
+	if os.Getenv("GO_WANT_HELPER_PROCESS_ENV") != "1" {
+		return
+	}
+	payload := fmt.Sprintf("token=%q keep=%q",
+		os.Getenv("UGABUGA_INSPECTOR_TOKEN"), os.Getenv("UGABUGA_KEEP_SENTINEL"))
+	fmt.Printf(`{"type":"content_block_delta","delta":{"type":"text_delta","text":%q}}`, payload)
+	fmt.Println()
+	fmt.Println(`{"type":"result","result":""}`)
+	os.Exit(0)
+}
+
+func TestClaudeExecutor_Run_RealRunner_ScrubsEnvKey(t *testing.T) {
+	// end-to-end: a worker spawned via the real execClaudeRunner path must not see a
+	// configured ScrubEnvKeys credential in its process env, while non-scrubbed vars survive.
+	t.Setenv("GO_WANT_HELPER_PROCESS_ENV", "1")
+	t.Setenv("UGABUGA_INSPECTOR_TOKEN", "supersecret")
+	t.Setenv("UGABUGA_KEEP_SENTINEL", "visible")
+	exe, err := os.Executable()
+	require.NoError(t, err)
+
+	e := &ClaudeExecutor{
+		Command:      exe,
+		Args:         "-test.run=TestHelperProcessEnv",
+		ScrubEnvKeys: []string{"UGABUGA_INSPECTOR_TOKEN"},
+		// cmdRunner is nil — exercises the real execClaudeRunner construction path
+	}
+
+	result := e.Run(context.Background(), "")
+	require.NoError(t, result.Error)
+	assert.Contains(t, result.Output, `token=""`, "scrubbed credential must not reach the worker")
+	assert.NotContains(t, result.Output, "supersecret", "secret value must not leak to the worker")
+	assert.Contains(t, result.Output, `keep="visible"`, "non-scrubbed env must still reach the worker")
 }
 
 func TestClaudeExecutor_Run_RealRunner_StdinWired(t *testing.T) {

@@ -4045,6 +4045,32 @@ func TestParseModelEffort(t *testing.T) {
 	}
 }
 
+func TestRunner_New_WiresScrubEnvKeys(t *testing.T) {
+	log := newMockLogger("progress.txt")
+	holder := &status.PhaseHolder{}
+
+	appCfg := testAppConfig(t)
+	appCfg.ScrubEnvKeys = []string{"UGABUGA_INSPECTOR_TOKEN", "UGABUGA_ORACLE_TOKEN"}
+
+	cfg := processor.Config{
+		Mode:          processor.ModeReview,
+		MaxIterations: 50,
+		CodexEnabled:  false,
+		TaskModel:     "opus",
+		ReviewModel:   "sonnet", // distinct spec forces a separate review executor
+		AppConfig:     appCfg,
+	}
+	r := processor.New(cfg, log, holder)
+
+	taskExec, ok := r.TestClaudeExecutor().(*executor.ClaudeExecutor)
+	require.True(t, ok, "task executor should be *executor.ClaudeExecutor")
+	assert.Equal(t, []string{"UGABUGA_INSPECTOR_TOKEN", "UGABUGA_ORACLE_TOKEN"}, taskExec.ScrubEnvKeys, "task executor scrub keys")
+
+	reviewExec, ok := r.TestReviewClaudeExecutor().(*executor.ClaudeExecutor)
+	require.True(t, ok, "review executor should be *executor.ClaudeExecutor")
+	assert.Equal(t, []string{"UGABUGA_INSPECTOR_TOKEN", "UGABUGA_ORACLE_TOKEN"}, reviewExec.ScrubEnvKeys, "review executor scrub keys")
+}
+
 func TestRunner_New_ModelEffortWiring(t *testing.T) {
 	log := newMockLogger("progress.txt")
 	holder := &status.PhaseHolder{}

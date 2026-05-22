@@ -20,6 +20,7 @@ type Values struct {
 	TaskModel                  string   // model for task execution (e.g., "opus", "sonnet", "haiku")
 	ReviewModel                string   // model for review phases (falls back to TaskModel if empty)
 	ClaudeErrorPatterns        []string // patterns to detect in claude output (e.g., rate limit messages)
+	ScrubEnvKeys               []string // additional env var names to strip from the claude child process
 	CodexEnabled               bool
 	CodexEnabledSet            bool // tracks if codex_enabled was explicitly set
 	CodexCommand               string
@@ -354,6 +355,9 @@ func (vl *valuesLoader) parseValuesFromBytes(data []byte) (Values, error) {
 	values.ClaudeErrorPatterns = vl.parseCommaSeparated(section, "claude_error_patterns")
 	values.CodexErrorPatterns = vl.parseCommaSeparated(section, "codex_error_patterns")
 
+	// additional env var names to strip from the claude child (comma-separated)
+	values.ScrubEnvKeys = vl.parseCommaSeparated(section, "scrub_env_keys")
+
 	// limit patterns (comma-separated, same format as error patterns)
 	values.ClaudeLimitPatterns = vl.parseCommaSeparated(section, "claude_limit_patterns")
 	values.CodexLimitPatterns = vl.parseCommaSeparated(section, "codex_limit_patterns")
@@ -543,6 +547,9 @@ func (dst *Values) mergeExtraFrom(src *Values) {
 	}
 	if len(src.ClaudeErrorPatterns) > 0 {
 		dst.ClaudeErrorPatterns = src.ClaudeErrorPatterns
+	}
+	if len(src.ScrubEnvKeys) > 0 {
+		dst.ScrubEnvKeys = src.ScrubEnvKeys
 	}
 	if len(src.CodexErrorPatterns) > 0 {
 		dst.CodexErrorPatterns = src.CodexErrorPatterns
