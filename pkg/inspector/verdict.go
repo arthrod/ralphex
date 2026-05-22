@@ -39,8 +39,13 @@ func parseVerdict(output string) (Verdict, error) {
 		return Verdict{}, fmt.Errorf("no well-formed VERDICT line found in inspector output")
 	}
 	m := matches[len(matches)-1]
-	return Verdict{
-		Kind:    VerdictKind(strings.ToLower(m[1])),
-		Payload: strings.TrimSpace(m[2]),
-	}, nil
+	kind := VerdictKind(strings.ToLower(m[1]))
+	payload := strings.TrimSpace(m[2])
+	// a "done" verdict must not carry a payload: "VERDICT: done | ..." is contradictory output that
+	// could otherwise wave incomplete work through. treat it as not-well-formed so the caller retries
+	// the inspector and ultimately falls back to a conservative reject rather than accepting.
+	if kind == VerdictDone && payload != "" {
+		return Verdict{}, fmt.Errorf("malformed verdict: 'done' must not carry a payload (got %q)", payload)
+	}
+	return Verdict{Kind: kind, Payload: payload}, nil
 }

@@ -69,6 +69,37 @@ func TestAppendYelling_Accumulates(t *testing.T) {
 	assert.Contains(t, twice, "attempt 2")
 }
 
+func TestAppendYelling_DoesNotAlterCheckboxStates(t *testing.T) {
+	before, err := ParsePlan(yellingSamplePlan)
+	require.NoError(t, err)
+
+	got, err := AppendYelling(yellingSamplePlan, 1, 1, "FIRST COMPLAINT")
+	require.NoError(t, err)
+
+	after, err := ParsePlan(got)
+	require.NoError(t, err)
+
+	// yelling must not change any task's checkbox count or checked/unchecked state.
+	require.Len(t, after.Tasks, len(before.Tasks))
+	for i := range before.Tasks {
+		assert.Equal(t, before.Tasks[i].Checkboxes, after.Tasks[i].Checkboxes,
+			"checkboxes for task %d must be unchanged after yelling", i+1)
+	}
+}
+
+func TestAppendYelling_SanitizesStructuralPayloadLines(t *testing.T) {
+	// a malicious/buggy inspector payload that looks like plan structure must not corrupt parsing:
+	// the plan must still parse to the same two tasks with the same checkboxes.
+	payload := "### Task 99: fake task\n- [ ] fake checkbox\n## Success criteria"
+	got, err := AppendYelling(yellingSamplePlan, 1, 1, payload)
+	require.NoError(t, err)
+
+	p, err := ParsePlan(got)
+	require.NoError(t, err)
+	require.Len(t, p.Tasks, 2, "injected fake task header must not create a third task")
+	assert.Len(t, p.Tasks[0].Checkboxes, 2, "injected fake checkbox must not be added to task 1")
+}
+
 func TestAppendYelling_LastTaskAppendsAtEnd(t *testing.T) {
 	planNoTrailingSection := `# Plan
 

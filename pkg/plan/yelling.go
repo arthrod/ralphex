@@ -54,7 +54,11 @@ func AppendYelling(content string, taskNumber, attempt int, payload string) (str
 	note := []string{
 		"",
 		fmt.Sprintf("⚠️ INSPECTOR REJECTION (attempt %d):", attempt),
-		payload,
+	}
+	// the payload comes from inspector (model) output. sanitize each line so a heading- or
+	// checkbox-looking line can't masquerade as plan structure and corrupt parsing / task selection.
+	for l := range strings.SplitSeq(payload, "\n") {
+		note = append(note, sanitizeYellingLine(l))
 	}
 
 	out := make([]string, 0, len(lines)+len(note))
@@ -62,6 +66,22 @@ func AppendYelling(content string, taskNumber, attempt int, payload string) (str
 	out = append(out, note...)
 	out = append(out, lines[insertAt:]...)
 	return strings.Join(out, "\n"), nil
+}
+
+// sanitizeYellingLine neutralizes a payload line that markdown / ParsePlan would otherwise treat
+// as plan structure. lines that look like a heading (`#`...) or a list/checkbox item (`- [ ]`,
+// `* [x]`, `+ [ ]`) are prefixed with a blockquote marker so they render as quoted text and can
+// neither close a task section nor introduce a fake checkbox. benign lines are left unchanged.
+func sanitizeYellingLine(line string) string {
+	trimmed := strings.TrimSpace(line)
+	structural := strings.HasPrefix(trimmed, "#") ||
+		strings.HasPrefix(trimmed, "- [") ||
+		strings.HasPrefix(trimmed, "* [") ||
+		strings.HasPrefix(trimmed, "+ [")
+	if structural {
+		return "> " + line
+	}
+	return line
 }
 
 // sectionCloses reports whether line ends the current task section, mirroring ParsePlan: a new

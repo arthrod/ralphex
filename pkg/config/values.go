@@ -55,6 +55,7 @@ type Values struct {
 	InspectorGateEnabled       bool
 	InspectorGateEnabledSet    bool // tracks if inspector_gate_enabled was explicitly set
 	MaxTaskAttempts            int  // reject threshold before escalating a task to the oracle (0 = default 3)
+	MaxTaskAttemptsSet         bool // tracks if max_task_attempts was explicitly set
 	MovePlanOnCompletion       bool
 	MovePlanOnCompletionSet    bool // tracks if move_plan_on_completion was explicitly set
 	WorktreeEnabled            bool
@@ -326,7 +327,11 @@ func (vl *valuesLoader) parseValuesFromBytes(data []byte) (Values, error) {
 		if intErr != nil {
 			return Values{}, fmt.Errorf("invalid max_task_attempts: %w", intErr)
 		}
+		if val < 0 {
+			return Values{}, fmt.Errorf("invalid max_task_attempts: must be non-negative, got %d", val)
+		}
 		values.MaxTaskAttempts = val
+		values.MaxTaskAttemptsSet = true
 	}
 
 	// move plan on completion
@@ -546,8 +551,9 @@ func (dst *Values) mergeExtraFrom(src *Values) {
 		dst.InspectorGateEnabled = src.InspectorGateEnabled
 		dst.InspectorGateEnabledSet = true
 	}
-	if src.MaxTaskAttempts > 0 {
+	if src.MaxTaskAttemptsSet {
 		dst.MaxTaskAttempts = src.MaxTaskAttempts
+		dst.MaxTaskAttemptsSet = true
 	}
 	if src.MovePlanOnCompletionSet {
 		dst.MovePlanOnCompletion = src.MovePlanOnCompletion

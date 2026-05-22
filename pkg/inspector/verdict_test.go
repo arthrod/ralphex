@@ -66,6 +66,13 @@ func TestParseVerdict(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			// a done verdict carrying a payload is contradictory; reject as malformed so it can't
+			// wave incomplete work through.
+			name:    "malformed - done must not carry a payload",
+			output:  "VERDICT: done | but tests are still failing",
+			wantErr: true,
+		},
+		{
 			name:    "empty output",
 			output:  "",
 			wantErr: true,

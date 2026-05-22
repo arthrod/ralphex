@@ -37,6 +37,13 @@ func (e executorReviewer) Review(ctx context.Context, prompt string) (string, er
 // worker can never self-certify because the parent both checks the boxes (on done) and parses the
 // verdict (which the worker's scrubbed env cannot forge).
 func (r *Runner) runTaskPhaseGated(ctx context.Context) error {
+	// the gate needs a separately-credentialed inspector. when the gate is enabled but no external
+	// review tool (codex/custom) is configured, reviewer is nil; fail with a clear error instead of
+	// panicking on a nil dereference inside inspector.Inspect.
+	if r.reviewer == nil {
+		return errors.New("inspector gate enabled but no external review tool (codex/custom) is configured")
+	}
+
 	store, err := r.openStateStore()
 	if err != nil {
 		return err

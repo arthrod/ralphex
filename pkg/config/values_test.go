@@ -166,6 +166,34 @@ max_task_attempts = 5
 	assert.True(t, values.InspectorGateEnabled)
 	assert.True(t, values.InspectorGateEnabledSet)
 	assert.Equal(t, 5, values.MaxTaskAttempts)
+	assert.True(t, values.MaxTaskAttemptsSet)
+}
+
+func TestValuesLoader_Load_MaxTaskAttemptsNegativeRejected(t *testing.T) {
+	tmpDir := t.TempDir()
+	globalConfig := filepath.Join(tmpDir, "config")
+	require.NoError(t, os.WriteFile(globalConfig, []byte("max_task_attempts = -1\n"), 0o600))
+
+	loader := newValuesLoader(defaultsFS)
+	_, err := loader.Load("", globalConfig)
+	require.Error(t, err, "negative max_task_attempts must fail fast like other numeric fields")
+}
+
+func TestValues_mergeExtraFrom_MaxTaskAttempts(t *testing.T) {
+	t.Run("explicit local zero resets a positive global", func(t *testing.T) {
+		// the whole reason the Set flag exists: a local config can set 0 to fall back to default
+		// even when global set a positive value.
+		dst := Values{MaxTaskAttempts: 5, MaxTaskAttemptsSet: true}
+		src := Values{MaxTaskAttempts: 0, MaxTaskAttemptsSet: true}
+		dst.mergeExtraFrom(&src)
+		assert.Equal(t, 0, dst.MaxTaskAttempts)
+	})
+	t.Run("unset local preserves global", func(t *testing.T) {
+		dst := Values{MaxTaskAttempts: 5, MaxTaskAttemptsSet: true}
+		src := Values{MaxTaskAttempts: 0, MaxTaskAttemptsSet: false}
+		dst.mergeExtraFrom(&src)
+		assert.Equal(t, 5, dst.MaxTaskAttempts)
+	})
 }
 
 func TestValuesLoader_Load_LocalOverridesGlobal(t *testing.T) {

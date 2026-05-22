@@ -37,14 +37,21 @@ func MarkTaskDone(content string, taskNumber int) (string, error) {
 		if sectionCloses(line) {
 			break
 		}
-		m := checkboxPattern.FindStringSubmatch(line)
-		if m == nil || m[1] != " " {
-			continue // not a checkbox, or already checked
+		// use the regex's matched positions to flip exactly the checkbox mark, rather than a blind
+		// strings.Replace of "[ ]" that could in principle touch other text on the line.
+		loc := checkboxPattern.FindStringSubmatchIndex(line)
+		if loc == nil {
+			continue // not a checkbox
 		}
-		if !(Checkbox{Text: strings.TrimSpace(m[2])}).IsActionable() {
+		mark := line[loc[2]:loc[3]]
+		text := line[loc[4]:loc[5]]
+		if mark != " " {
+			continue // already checked
+		}
+		if !(Checkbox{Text: strings.TrimSpace(text)}).IsActionable() {
 			continue // example checkbox, not part of completion
 		}
-		lines[i] = strings.Replace(line, "[ ]", "[x]", 1)
+		lines[i] = line[:loc[2]] + "x" + line[loc[3]:]
 	}
 
 	return strings.Join(lines, "\n"), nil

@@ -62,6 +62,21 @@ const oneTaskPlan = `# Plan
 - [ ] implement
 `
 
+func TestRunTaskPhaseGated_NilReviewerReturnsError(t *testing.T) {
+	// gate enabled but no codex/custom reviewer wired: must return a clear error, not panic.
+	dir := t.TempDir()
+	planPath := filepath.Join(dir, "plan.md")
+	require.NoError(t, os.WriteFile(planPath, []byte(oneTaskPlan), 0o600))
+	cfg := Config{Mode: ModeFull, MaxIterations: 3, PlanFile: planPath, InspectorGateEnabled: true}
+	r := NewWithExecutors(cfg, newMockLogger("progress.txt"), Executors{Claude: &mocks.ExecutorMock{}}, &status.PhaseHolder{})
+	r.inspectorStateDB = filepath.Join(dir, "state.db")
+	require.Nil(t, r.reviewer, "no codex/custom executor means no reviewer")
+
+	err := r.runTaskPhaseGated(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no external review tool")
+}
+
 func TestRunTaskPhaseGated_DoneAcceptsAndCompletes(t *testing.T) {
 	r, planPath := newGatedRunner(t, oneTaskPlan, "VERDICT: done")
 
