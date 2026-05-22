@@ -998,6 +998,37 @@ func TestService_GetDefaultBranch(t *testing.T) {
 	})
 }
 
+func TestService_Diff(t *testing.T) {
+	t.Run("returns diff between two refs", func(t *testing.T) {
+		dir := setupExternalTestRepo(t)
+		svc, err := NewService(dir, noopServiceLogger())
+		require.NoError(t, err)
+
+		from := strings.TrimSpace(runGit(t, dir, "rev-parse", "HEAD"))
+
+		newFile := filepath.Join(dir, "worker.go")
+		require.NoError(t, os.WriteFile(newFile, []byte("package main\n\nfunc Added() {}\n"), 0o600))
+		require.NoError(t, svc.repo.add("worker.go"))
+		require.NoError(t, svc.repo.commit("worker did a thing"))
+
+		diff, err := svc.Diff(from, "HEAD")
+		require.NoError(t, err)
+		assert.Contains(t, diff, "worker.go")
+		assert.Contains(t, diff, "func Added()")
+	})
+
+	t.Run("empty diff when refs identical", func(t *testing.T) {
+		dir := setupExternalTestRepo(t)
+		svc, err := NewService(dir, noopServiceLogger())
+		require.NoError(t, err)
+
+		head := strings.TrimSpace(runGit(t, dir, "rev-parse", "HEAD"))
+		diff, err := svc.Diff(head, "HEAD")
+		require.NoError(t, err)
+		assert.Empty(t, strings.TrimSpace(diff))
+	})
+}
+
 func TestService_DiffStats(t *testing.T) {
 	t.Run("returns zero stats when on same branch", func(t *testing.T) {
 		dir := setupExternalTestRepo(t)
@@ -1757,4 +1788,3 @@ func TestService_resolveFilesystemCase(t *testing.T) {
 		})
 	}
 }
-

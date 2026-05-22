@@ -118,6 +118,20 @@ external_review_tool = codex
 # default: empty (nothing extra stripped)
 # scrub_env_keys = MY_INSPECTOR_TOKEN,MY_ORACLE_TOKEN
 
+# inspector_gate_enabled: when true, the task phase does not trust the worker's
+# own claim of completion. Instead the worker completes ONE task, commits, and
+# proposes completion; a separately-credentialed inspector (the configured
+# external-review tool) reviews the diff and renders a verdict the parent acts
+# on (done / reject-with-yelling / escalate). CLI flag: --inspector-gate.
+# default: false
+# inspector_gate_enabled = false
+
+# max_task_attempts: number of inspector rejections a task may accumulate before
+# it escalates to the oracle for human revision. Only used when the inspector
+# gate is enabled.
+# default: 3
+# max_task_attempts = 3
+
 # ------------------------------------------------------------------------------
 # plan move behavior
 # ------------------------------------------------------------------------------

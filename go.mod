@@ -8,6 +8,7 @@ require (
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/go-pkgz/notify v1.3.0
 	github.com/jessevdk/go-flags v1.6.1
+	github.com/mattn/go-sqlite3 v1.14.44
 	github.com/playwright-community/playwright-go v0.5700.1
 	github.com/pmezard/go-difflib v1.0.0
 	github.com/stretchr/testify v1.11.1

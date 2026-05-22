@@ -354,6 +354,7 @@ func TestDetectSignal(t *testing.T) {
 		{"review complete " + status.ReviewDone, status.ReviewDone},
 		{status.CodexDone + " analysis done", status.CodexDone},
 		{"plan complete " + status.PlanReady, status.PlanReady},
+		{"committed, " + status.PeasantTired, status.PeasantTired},
 		{"no signal here", ""},
 	}
 

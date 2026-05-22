@@ -514,6 +514,7 @@ func detectSignal(text string) string {
 		status.ReviewDone,
 		status.CodexDone,
 		status.PlanReady,
+		status.PeasantTired,
 	}
 	for _, sig := range knownSignals {
 		if strings.Contains(text, sig) {

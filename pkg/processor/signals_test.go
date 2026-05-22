@@ -26,6 +26,24 @@ func Test_isReviewDone(t *testing.T) {
 	}
 }
 
+func Test_isPeasantTired(t *testing.T) {
+	tests := []struct {
+		signal string
+		want   bool
+	}{
+		{SignalPeasantTired, true},
+		{SignalCompleted, false},
+		{SignalReviewDone, false},
+		{"", false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.signal, func(t *testing.T) {
+			assert.Equal(t, tc.want, isPeasantTired(tc.signal))
+		})
+	}
+}
+
 func Test_isCodexDone(t *testing.T) {
 	tests := []struct {
 		signal string

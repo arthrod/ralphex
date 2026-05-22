@@ -52,6 +52,10 @@ type Values struct {
 	FinalizeEnabledSet         bool // tracks if finalize_enabled was explicitly set
 	PreserveAnthropicAPIKey    bool
 	PreserveAnthropicAPIKeySet bool // tracks if preserve_anthropic_api_key was explicitly set
+	InspectorGateEnabled       bool
+	InspectorGateEnabledSet    bool // tracks if inspector_gate_enabled was explicitly set
+	MaxTaskAttempts            int  // reject threshold before escalating a task to the oracle (0 = default 3)
+	MaxTaskAttemptsSet         bool // tracks if max_task_attempts was explicitly set
 	MovePlanOnCompletion       bool
 	MovePlanOnCompletionSet    bool // tracks if move_plan_on_completion was explicitly set
 	WorktreeEnabled            bool
@@ -309,6 +313,27 @@ func (vl *valuesLoader) parseValuesFromBytes(data []byte) (Values, error) {
 		values.PreserveAnthropicAPIKeySet = true
 	}
 
+	// per-task credential-gated inspector loop
+	if key, err := section.GetKey("inspector_gate_enabled"); err == nil {
+		val, boolErr := key.Bool()
+		if boolErr != nil {
+			return Values{}, fmt.Errorf("invalid inspector_gate_enabled: %w", boolErr)
+		}
+		values.InspectorGateEnabled = val
+		values.InspectorGateEnabledSet = true
+	}
+	if key, err := section.GetKey("max_task_attempts"); err == nil {
+		val, intErr := key.Int()
+		if intErr != nil {
+			return Values{}, fmt.Errorf("invalid max_task_attempts: %w", intErr)
+		}
+		if val < 0 {
+			return Values{}, fmt.Errorf("invalid max_task_attempts: must be non-negative, got %d", val)
+		}
+		values.MaxTaskAttempts = val
+		values.MaxTaskAttemptsSet = true
+	}
+
 	// move plan on completion
 	if key, err := section.GetKey("move_plan_on_completion"); err == nil {
 		val, boolErr := key.Bool()
@@ -521,6 +546,14 @@ func (dst *Values) mergeExtraFrom(src *Values) {
 	if src.PreserveAnthropicAPIKeySet {
 		dst.PreserveAnthropicAPIKey = src.PreserveAnthropicAPIKey
 		dst.PreserveAnthropicAPIKeySet = true
+	}
+	if src.InspectorGateEnabledSet {
+		dst.InspectorGateEnabled = src.InspectorGateEnabled
+		dst.InspectorGateEnabledSet = true
+	}
+	if src.MaxTaskAttemptsSet {
+		dst.MaxTaskAttempts = src.MaxTaskAttempts
+		dst.MaxTaskAttemptsSet = true
 	}
 	if src.MovePlanOnCompletionSet {
 		dst.MovePlanOnCompletion = src.MovePlanOnCompletion

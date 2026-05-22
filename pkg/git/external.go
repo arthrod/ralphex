@@ -435,6 +435,15 @@ func (e *externalBackend) diffStats(baseBranch string) (DiffStats, error) {
 	return result, nil
 }
 
+// diff returns the textual diff between two refs (fromRef toRef).
+func (e *externalBackend) diff(fromRef, toRef string) (string, error) {
+	out, err := e.run("diff", fromRef, toRef)
+	if err != nil {
+		return "", fmt.Errorf("diff %s %s: %w", fromRef, toRef, err)
+	}
+	return out, nil
+}
+
 // resolveRef tries to resolve a branch name to a valid git ref.
 // checks local branch, remote tracking (origin/<name>), "origin/" prefixed names,
 // and finally arbitrary refs like commit hashes or tags via rev-parse.

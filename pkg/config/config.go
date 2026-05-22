@@ -76,6 +76,9 @@ type Config struct {
 
 	PreserveAnthropicAPIKey bool `json:"preserve_anthropic_api_key"` // when true, ANTHROPIC_API_KEY is passed through to the claude child process
 
+	InspectorGateEnabled bool `json:"inspector_gate_enabled"` // when true, task phase uses the per-task credential-gated inspector loop
+	MaxTaskAttempts      int  `json:"max_task_attempts"`      // reject threshold before escalating a task to the oracle (0 = default 3)
+
 	MovePlanOnCompletion bool `json:"move_plan_on_completion"`
 
 	WorktreeEnabled    bool `json:"worktree_enabled"`
@@ -310,6 +313,8 @@ func loadConfigFromDirs(globalDir, localDir string) (*Config, error) {
 		FinalizeEnabled:         values.FinalizeEnabled,
 		FinalizeEnabledSet:      values.FinalizeEnabledSet,
 		PreserveAnthropicAPIKey: values.PreserveAnthropicAPIKey,
+		InspectorGateEnabled:    values.InspectorGateEnabled,
+		MaxTaskAttempts:         values.MaxTaskAttempts,
 		MovePlanOnCompletion:    values.MovePlanOnCompletion,
 		WorktreeEnabled:         values.WorktreeEnabled,
 		WorktreeEnabledSet:      values.WorktreeEnabledSet,
