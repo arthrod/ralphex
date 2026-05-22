@@ -55,8 +55,11 @@ With the gate enabled, the task phase runs **one task per worker invocation**:
    attempt count resets, and the loop retries the revised task. On decline, the run aborts and the plan
    is left untouched.
 
-Per-task attempt counts and statuses are persisted in a SQLite store at
-`.ralphex/inspector-state.db`, so the gate survives restarts.
+Per-task attempt counts and statuses are persisted in a SQLite store under the repository's
+`.ralphex/` directory, so the gate survives restarts. The file is namespaced by branch
+(`.ralphex/inspector-state-<branch>.db`) and, in worktree mode, lives in the **main** repository
+rather than the worktree — so it outlives worktree teardown and a later restart resumes where it
+left off, and parallel worktrees running different plans never collide on task positions.
 
 The gate applies to the task phase of `--inspector-gate` runs (full and tasks-only modes). The
 existing post-task code-review phases are unchanged.
@@ -176,4 +179,5 @@ variables (`{{PLAN_FILE}}`, `{{DEFAULT_BRANCH}}`, etc.) are also expanded in all
 
 ## Limitations
 
-- The interaction between worktree mode and the state DB path is not yet validated.
+- The gate reuses the external-review tool as both inspector and oracle, so it requires an external
+  tool (`codex` or `custom`) to be configured — `external_review_tool = none` cannot drive the gate.

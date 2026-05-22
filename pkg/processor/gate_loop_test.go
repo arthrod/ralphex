@@ -135,6 +135,20 @@ func TestRunTaskPhaseGated_RepeatedRejectEscalatesAndOracleDeclineAborts(t *test
 	assert.Contains(t, string(got), "- [ ] implement", "box must stay unchecked on reject")
 }
 
+func TestNewWithExecutors_WiresInspectorStateDB(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "sub", "inspector-state-feature.db")
+	cfg := Config{InspectorGateEnabled: true, InspectorStateDB: dbPath}
+	r := NewWithExecutors(cfg, newMockLogger("progress.txt"), Executors{}, &status.PhaseHolder{})
+
+	store, err := r.openStateStore()
+	require.NoError(t, err)
+	defer func() { _ = store.Close() }()
+
+	// the store must open at the configured path (creating parent dirs), not the CWD default.
+	assert.FileExists(t, dbPath, "openStateStore must honor the configured InspectorStateDB path")
+}
+
 func TestRunOracle_AutoApproveAppliesWithoutInputCollector(t *testing.T) {
 	r, planPath := newGatedRunner(t, "VERDICT: done") // verdict unused here
 	r.codex = &mocks.ExecutorMock{RunFunc: func(_ context.Context, _ string) executor.Result {

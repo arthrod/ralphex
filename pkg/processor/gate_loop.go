@@ -222,7 +222,10 @@ func writePlanPreservingMode(path string, content []byte) error {
 	return nil
 }
 
-// openStateStore opens (creating dirs as needed) the per-task inspector state store.
+// openStateStore opens (creating dirs as needed) the per-task inspector state store. The path is
+// normally supplied by the caller (anchored to the main repo and namespaced by branch so it
+// survives worktree teardown and parallel runs don't collide); when unset it falls back to a
+// CWD-relative default for standalone/test use.
 func (r *Runner) openStateStore() (*state.Store, error) {
 	path := r.inspectorStateDB
 	if path == "" {

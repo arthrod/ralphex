@@ -2402,3 +2402,43 @@ func branchExists(t *testing.T, dir, branch string) bool {
 	require.NoError(t, err)
 	return strings.TrimSpace(string(out)) != ""
 }
+
+func TestSanitizeBranchForFilename(t *testing.T) {
+	tests := []struct {
+		name, branch, want string
+	}{
+		{"plain", "fix-issues", "fix-issues"},
+		{"slash", "feature/foo", "feature-foo"},
+		{"nested slashes", "user/feat/bar", "user-feat-bar"},
+		{"spaces and colon", "wip: my branch", "wip-my-branch"},
+		{"empty", "", ""},
+		{"unknown sentinel", "unknown", ""},
+		{"keeps dots and underscores", "v1.2_rc", "v1.2_rc"},
+		{"trims leading/trailing dashes", "/weird/", "weird"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, sanitizeBranchForFilename(tt.branch))
+		})
+	}
+}
+
+func TestInspectorStateDBPath(t *testing.T) {
+	root := t.TempDir() // variable root keeps the gocritic filepathJoin rule happy
+	t.Run("anchored to main root and namespaced by branch", func(t *testing.T) {
+		got := inspectorStateDBPath(root, "feature/foo")
+		assert.Equal(t, filepath.Join(root, ".ralphex", "inspector-state-feature-foo.db"), got)
+	})
+	t.Run("blank branch falls back to unnamespaced name", func(t *testing.T) {
+		got := inspectorStateDBPath(root, "")
+		assert.Equal(t, filepath.Join(root, ".ralphex", "inspector-state.db"), got)
+	})
+	t.Run("empty main root yields blank (runner uses its CWD default)", func(t *testing.T) {
+		assert.Empty(t, inspectorStateDBPath("", "fix-issues"))
+	})
+	t.Run("two branches map to distinct files in the same main repo", func(t *testing.T) {
+		a := inspectorStateDBPath(root, "plan-a")
+		b := inspectorStateDBPath(root, "plan-b")
+		assert.NotEqual(t, a, b, "parallel worktrees on different plans must not share a state db")
+	})
+}
