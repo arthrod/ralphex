@@ -19,10 +19,46 @@ builds:
     ldflags:
       - -s -w -X main.revision={{.Tag}}-{{.ShortCommit}}-{{ trimsuffix (replace (replace .CommitDate "-" "") ":" "") "Z" }}
 
+  - id: worker-task
+    main: ./cmd/worker-task
+    binary: worker-task
+    env: [CGO_ENABLED=0]
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    ldflags: [-s -w]
+
+  - id: oracle-task
+    main: ./cmd/oracle-task
+    binary: oracle-task
+    env: [CGO_ENABLED=0]
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    ldflags: [-s -w]
+
+  - id: inspector-task
+    main: ./cmd/inspector-task
+    binary: inspector-task
+    env: [CGO_ENABLED=0]
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    ldflags: [-s -w]
+
+  - id: orchestrator-task
+    main: ./cmd/orchestrator-task
+    binary: orchestrator-task
+    env: [CGO_ENABLED=0]
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    ldflags: [-s -w]
+
 archives:
   - id: ralphex
     builds:
       - ralphex
+      - worker-task
+      - oracle-task
+      - inspector-task
+      - orchestrator-task
     name_template: >-
       {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
     files:

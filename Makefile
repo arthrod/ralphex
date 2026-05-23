@@ -12,6 +12,11 @@ build:
 	cd cmd/ralphex && go build -ldflags "-X main.revision=$(REV) -s -w" -o ../../.bin/ralphex.$(BRANCH)
 	cp .bin/ralphex.$(BRANCH) .bin/ralphex
 
+build-agentbus:
+	for tool in worker-task oracle-task inspector-task orchestrator-task; do \
+		cd cmd/$$tool && go build -ldflags "-s -w" -o ../../.bin/$$tool && cd ../..; \
+	done
+
 test:
 	go clean -testcache
 	go test -race -coverprofile=coverage.out ./...
@@ -102,4 +107,4 @@ docker-build-go: docker-build
 docker-run:
 	./scripts/ralphex-dk.sh $(ARGS)
 
-.PHONY: all build test lint fmt race version e2e-setup e2e e2e-ui e2e-prep e2e-review e2e-codex prep_site docker-build docker-build-go docker-run
+.PHONY: all build build-agentbus test lint fmt race version e2e-setup e2e e2e-ui e2e-prep e2e-review e2e-codex prep_site docker-build docker-build-go docker-run
