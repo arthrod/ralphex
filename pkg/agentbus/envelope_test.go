@@ -3,10 +3,71 @@ package agentbus
 import (
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestHandoffMacRoundTrip(t *testing.T) {
+	key := []byte("a-32-byte-or-so-test-hmac-key!!!")
+	h := Handoff{Seq: 7, From: RoleWorker, To: RoleInspector, Status: StatusDone, ConfirmCurrent: "task t1", Message: "done", Time: time.Unix(1700000000, 0).UTC()}
+
+	mac := macForHandoff(h, key)
+	assert.NotEmpty(t, mac)
+	h.Mac = mac
+	assert.True(t, VerifyHandoffMac(h, key), "freshly signed handoff must verify")
+
+	t.Run("wrong key rejected", func(t *testing.T) {
+		assert.False(t, VerifyHandoffMac(h, []byte("different-key-entirely-here-xxxx")))
+	})
+
+	t.Run("missing mac rejected", func(t *testing.T) {
+		bare := h
+		bare.Mac = ""
+		assert.False(t, VerifyHandoffMac(bare, key))
+	})
+
+	// tampering with any field invalidates the mac
+	tamper := []struct {
+		name   string
+		mutate func(*Handoff)
+	}{
+		{"seq", func(x *Handoff) { x.Seq = 8 }},
+		{"from", func(x *Handoff) { x.From = RoleOracle }},
+		{"to", func(x *Handoff) { x.To = RoleOrchestrator }},
+		{"status", func(x *Handoff) { x.Status = StatusIncomplete }},
+		{"confirm_current", func(x *Handoff) { x.ConfirmCurrent = "other" }},
+		{"message", func(x *Handoff) { x.Message = "altered" }},
+		{"time", func(x *Handoff) { x.Time = x.Time.Add(time.Second) }},
+	}
+	for _, tt := range tamper {
+		t.Run("tampered_"+tt.name, func(t *testing.T) {
+			altered := h // copy, keeps the original mac
+			tt.mutate(&altered)
+			assert.False(t, VerifyHandoffMac(altered, key), "tampering with %s must invalidate the mac", tt.name)
+		})
+	}
+}
+
+func TestAppendSignedHandoff(t *testing.T) {
+	t.Setenv("AGENTBUS_DIR", t.TempDir())
+	key := []byte("append-signed-test-key-32-bytes!")
+
+	stored, err := AppendSignedHandoff(Handoff{From: RoleWorker, To: RoleInspector, Message: "done"}, key)
+	require.NoError(t, err)
+	assert.Equal(t, 1, stored.Seq)
+	assert.False(t, stored.Time.IsZero())
+	assert.NotEmpty(t, stored.Mac)
+	assert.True(t, VerifyHandoffMac(stored, key))
+
+	// the line read back from disk carries the same seq/time/mac that were signed
+	all, err := ReadHandoffsSince(0)
+	require.NoError(t, err)
+	require.Len(t, all, 1)
+	assert.Equal(t, stored.Mac, all[0].Mac)
+	assert.True(t, VerifyHandoffMac(all[0], key), "persisted line must verify")
+}
 
 func TestAppendAndReadHandoffs(t *testing.T) {
 	t.Setenv("AGENTBUS_DIR", t.TempDir())

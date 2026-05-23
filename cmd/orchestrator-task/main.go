@@ -105,15 +105,20 @@ type serveCmd struct {
 }
 
 func (c *serveCmd) Execute([]string) error {
-	if !agentbus.RegistryExists() {
-		if _, gerr := agentbus.GenerateRegistry(); gerr != nil {
-			return fmt.Errorf("generate registry: %w", gerr)
-		}
-		fmt.Println("generated token registry")
+	if err := agentbus.EnsureDir(); err != nil {
+		return fmt.Errorf("ensure state dir: %w", err)
+	}
+
+	// the auth server holds the token registry and the hmac key in memory only; nothing
+	// is written to disk, so a worker running as the same os user cannot read another
+	// role's credential.
+	srv, err := agentbus.NewAuthServer()
+	if err != nil {
+		return fmt.Errorf("create auth server: %w", err)
 	}
 
 	launcher := agentbus.NewTmuxLauncher()
-	roleEnv, err := agentbus.RoleEnvFromRegistry()
+	roleEnv, err := agentbus.RoleEnvFromRegistry(srv.Registry())
 	if err != nil {
 		return fmt.Errorf("build role env: %w", err)
 	}
@@ -123,8 +128,18 @@ func (c *serveCmd) Execute([]string) error {
 		return fmt.Errorf("ensure sessions: %w", err)
 	}
 
+	if err := srv.Listen(agentbus.SocketPath()); err != nil {
+		return fmt.Errorf("listen on auth socket: %w", err)
+	}
+	defer func() { _ = srv.Close() }()
+	go func() {
+		if serr := srv.Serve(ctx); serr != nil {
+			fmt.Fprintf(os.Stderr, "[supervisor] auth server: %v\n", serr)
+		}
+	}()
+
 	sup := agentbus.NewSupervisor(launcher, agentbus.NewGit(agentbus.RepoRoot()), c.HealthInterval,
-		func(format string, args ...any) { fmt.Fprintf(os.Stderr, "[supervisor] "+format+"\n", args...) })
+		func(format string, args ...any) { fmt.Fprintf(os.Stderr, "[supervisor] "+format+"\n", args...) }, srv.MacKey())
 	fmt.Printf("supervisor watching %s (health every %s)\n", agentbus.Dir(), c.HealthInterval)
 	if err := sup.Watch(ctx); err != nil && !errors.Is(err, context.Canceled) {
 		return fmt.Errorf("supervisor watch: %w", err)

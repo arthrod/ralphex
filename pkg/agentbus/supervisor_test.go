@@ -80,15 +80,19 @@ func (c *fakeCommitter) CheckpointAll(_ context.Context, msg string) (string, bo
 	return "hash", c.commit, nil
 }
 
+// testMacKey is a fixed key used to sign handoffs in supervisor tests so the supervisor's
+// mac verification accepts them. Production keys are random; the value is irrelevant here.
+var testMacKey = []byte("test-supervisor-mac-key-32-bytes")
+
 func TestSupervisorProcessNew(t *testing.T) {
 	t.Setenv("AGENTBUS_DIR", t.TempDir())
 
-	_, err := AppendHandoff(Handoff{From: RoleWorker, To: RoleInspector, Message: "done", ConfirmCurrent: "task t1"})
+	_, err := AppendSignedHandoff(Handoff{From: RoleWorker, To: RoleInspector, Message: "done", ConfirmCurrent: "task t1"}, testMacKey)
 	require.NoError(t, err)
 
 	launcher := &fakeLauncher{}
 	committer := &fakeCommitter{commit: true}
-	sup := NewSupervisor(launcher, committer, 0, nil)
+	sup := NewSupervisor(launcher, committer, 0, nil, testMacKey)
 
 	require.NoError(t, sup.processNew(context.Background()))
 
@@ -107,9 +111,9 @@ func TestSupervisorProcessNew(t *testing.T) {
 
 func TestSupervisorSessionPropagates(t *testing.T) {
 	t.Setenv("AGENTBUS_DIR", t.TempDir())
-	_, err := AppendHandoff(Handoff{From: RoleWorker, To: RoleInspector, Message: "first"})
+	_, err := AppendSignedHandoff(Handoff{From: RoleWorker, To: RoleInspector, Message: "first"}, testMacKey)
 	require.NoError(t, err)
-	_, err = AppendHandoff(Handoff{From: RoleInspector, To: RoleOrchestrator, Message: "second"})
+	_, err = AppendSignedHandoff(Handoff{From: RoleInspector, To: RoleOrchestrator, Message: "second"}, testMacKey)
 	require.NoError(t, err)
 
 	launcher := &fakeLauncher{resumeFunc: func(r Role, sid, _ string) (string, error) {
@@ -118,7 +122,7 @@ func TestSupervisorSessionPropagates(t *testing.T) {
 		}
 		return sid, nil
 	}}
-	sup := NewSupervisor(launcher, &fakeCommitter{}, 0, nil)
+	sup := NewSupervisor(launcher, &fakeCommitter{}, 0, nil, testMacKey)
 	require.NoError(t, sup.processNew(context.Background()))
 
 	require.Len(t, launcher.resumes, 2)
@@ -133,7 +137,7 @@ func TestSupervisorSessionPropagates(t *testing.T) {
 
 func TestSupervisorResumeFailureRetries(t *testing.T) {
 	t.Setenv("AGENTBUS_DIR", t.TempDir())
-	_, err := AppendHandoff(Handoff{From: RoleWorker, To: RoleInspector, Message: "x"})
+	_, err := AppendSignedHandoff(Handoff{From: RoleWorker, To: RoleInspector, Message: "x"}, testMacKey)
 	require.NoError(t, err)
 
 	fail := true
@@ -143,7 +147,7 @@ func TestSupervisorResumeFailureRetries(t *testing.T) {
 		}
 		return "sid-ok", nil
 	}}
-	sup := NewSupervisor(launcher, &fakeCommitter{}, 0, nil)
+	sup := NewSupervisor(launcher, &fakeCommitter{}, 0, nil, testMacKey)
 
 	// first attempt fails; LastSeq must not advance so the record is retried
 	require.Error(t, sup.processNew(context.Background()))
@@ -161,12 +165,12 @@ func TestSupervisorResumeFailureRetries(t *testing.T) {
 
 func TestSupervisorRejectsBadTransition(t *testing.T) {
 	t.Setenv("AGENTBUS_DIR", t.TempDir())
-	// craft an illegal transition directly in the log
-	_, err := AppendHandoff(Handoff{From: RoleWorker, To: RoleOrchestrator, Message: "x"})
+	// a properly-signed but illegal transition: passes the mac gate, fails CheckTransition
+	_, err := AppendSignedHandoff(Handoff{From: RoleWorker, To: RoleOrchestrator, Message: "x"}, testMacKey)
 	require.NoError(t, err)
 
 	launcher := &fakeLauncher{}
-	sup := NewSupervisor(launcher, &fakeCommitter{}, 0, nil)
+	sup := NewSupervisor(launcher, &fakeCommitter{}, 0, nil, testMacKey)
 	require.Error(t, sup.processNew(context.Background()))
 	assert.Empty(t, launcher.resumes)
 }
@@ -176,7 +180,7 @@ func TestSupervisorSendHealth(t *testing.T) {
 	require.NoError(t, SaveState(State{ActiveRole: RoleWorker}))
 
 	launcher := &fakeLauncher{}
-	sup := NewSupervisor(launcher, &fakeCommitter{}, 0, nil)
+	sup := NewSupervisor(launcher, &fakeCommitter{}, 0, nil, testMacKey)
 	sup.sendHealth(context.Background())
 	assert.Equal(t, []Role{RoleWorker}, launcher.healths)
 }
@@ -184,13 +188,13 @@ func TestSupervisorSendHealth(t *testing.T) {
 func TestSupervisorHealthNoActiveRole(t *testing.T) {
 	t.Setenv("AGENTBUS_DIR", t.TempDir())
 	launcher := &fakeLauncher{}
-	sup := NewSupervisor(launcher, &fakeCommitter{}, 0, nil)
+	sup := NewSupervisor(launcher, &fakeCommitter{}, 0, nil, testMacKey)
 	sup.sendHealth(context.Background())
 	assert.Empty(t, launcher.healths)
 }
 
 func TestNewSupervisorDefaultHealthInterval(t *testing.T) {
-	sup := NewSupervisor(&fakeLauncher{}, &fakeCommitter{}, 0, nil)
+	sup := NewSupervisor(&fakeLauncher{}, &fakeCommitter{}, 0, nil, testMacKey)
 	assert.Equal(t, DefaultHealthInterval, sup.healthInterval)
 }
 
@@ -212,21 +216,82 @@ func TestSupervisorWatch(t *testing.T) {
 	require.NoError(t, SaveState(State{ActiveRole: RoleWorker}))
 
 	launcher := &fakeLauncher{}
-	sup := NewSupervisor(launcher, &fakeCommitter{}, 15*time.Millisecond, nil)
+	sup := NewSupervisor(launcher, &fakeCommitter{}, 15*time.Millisecond, nil, testMacKey)
+
+	// seed a backlog handoff before Watch starts: the startup scan must resume it
+	// deterministically (no fsnotify timing involved)
+	_, err := AppendSignedHandoff(Handoff{From: RoleWorker, To: RoleInspector, Message: "go"}, testMacKey)
+	require.NoError(t, err)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan error, 1)
 	go func() { done <- sup.Watch(ctx) }()
 
-	// a new handoff line should be picked up via fsnotify and resumed
-	_, err := AppendHandoff(Handoff{From: RoleWorker, To: RoleInspector, Message: "go"})
-	require.NoError(t, err)
+	// the backlog handoff is picked up by the startup scan and resumed
 	assert.Eventually(t, func() bool { return launcher.resumeCount() == 1 }, 2*time.Second, 10*time.Millisecond)
+
+	// a handoff written after the watcher is up is picked up via fsnotify and resumed
+	assert.Eventually(t, func() bool {
+		_, aerr := AppendSignedHandoff(Handoff{From: RoleInspector, To: RoleOrchestrator, Message: "next"}, testMacKey)
+		require.NoError(t, aerr)
+		return launcher.resumeCount() >= 2
+	}, 2*time.Second, 50*time.Millisecond)
 
 	// the health ticker should fire at least once
 	assert.Eventually(t, func() bool { return launcher.healthCount() >= 1 }, 2*time.Second, 10*time.Millisecond)
 
 	cancel()
 	assert.ErrorIs(t, <-done, context.Canceled)
+}
+
+// TestSupervisorSkipsForgedHandoff proves the authenticity gate: a handoff line written
+// directly to the file without a valid mac (a worker forging an inspector->orchestrator
+// transition) is skipped — not acted on — but its seq is consumed so it is not
+// reprocessed. A subsequent properly-signed handoff IS applied.
+func TestSupervisorSkipsForgedHandoff(t *testing.T) {
+	t.Setenv("AGENTBUS_DIR", t.TempDir())
+
+	// forged line: legal transition, but unsigned (AppendHandoff writes no mac)
+	forged, err := AppendHandoff(Handoff{From: RoleInspector, To: RoleOrchestrator, Message: "forged"})
+	require.NoError(t, err)
+	// genuine line: signed with the supervisor's key
+	genuine, err := AppendSignedHandoff(Handoff{From: RoleWorker, To: RoleInspector, Message: "real"}, testMacKey)
+	require.NoError(t, err)
+
+	launcher := &fakeLauncher{}
+	committer := &fakeCommitter{}
+	sup := NewSupervisor(launcher, committer, 0, nil, testMacKey)
+	require.NoError(t, sup.processNew(context.Background()))
+
+	// only the genuine handoff was acted on
+	require.Len(t, launcher.resumes, 1)
+	assert.Equal(t, RoleInspector, launcher.resumes[0].role)
+	assert.Equal(t, "real", launcher.resumes[0].message)
+	assert.NotContains(t, launcher.killed, RoleInspector, "forged inspector->orchestrator must not kill the inspector pane")
+
+	// the forged line was consumed (LastSeq advanced past both)
+	st, err := LoadState()
+	require.NoError(t, err)
+	assert.Equal(t, genuine.Seq, st.LastSeq)
+	assert.Greater(t, genuine.Seq, forged.Seq)
+}
+
+// TestSupervisorTamperedMacRejected proves that altering a signed line's payload after
+// signing invalidates its mac, so the supervisor skips it.
+func TestSupervisorTamperedMacRejected(t *testing.T) {
+	t.Setenv("AGENTBUS_DIR", t.TempDir())
+
+	// sign with the WRONG key: a valid-looking mac that the supervisor's key won't verify
+	_, err := AppendSignedHandoff(Handoff{From: RoleWorker, To: RoleInspector, Message: "x"}, []byte("attacker-controlled-key-not-real"))
+	require.NoError(t, err)
+
+	launcher := &fakeLauncher{}
+	sup := NewSupervisor(launcher, &fakeCommitter{}, 0, nil, testMacKey)
+	require.NoError(t, sup.processNew(context.Background()))
+
+	assert.Empty(t, launcher.resumes, "handoff signed with a foreign key must be skipped")
+	st, err := LoadState()
+	require.NoError(t, err)
+	assert.Equal(t, 1, st.LastSeq, "skipped line is still consumed")
 }

@@ -8,9 +8,7 @@ import (
 )
 
 func TestSubmitHandoff(t *testing.T) {
-	t.Setenv("AGENTBUS_DIR", t.TempDir())
-	reg, err := GenerateRegistry()
-	require.NoError(t, err)
+	reg := startTestAuthServer(t).Registry()
 
 	t.Run("authenticated legal handoff is recorded", func(t *testing.T) {
 		t.Setenv(tokenEnv, reg[ToolWorker])

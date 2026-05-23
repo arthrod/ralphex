@@ -1,29 +1,41 @@
 package agentbus
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+	"os"
+)
 
-// SubmitHandoff authenticates the calling tool, stamps the source role, validates the
-// transition, and appends the envelope to the durable log. It is the single entry point
-// the worker/oracle/inspector binaries use, so every handoff is authenticated and legal
-// before it is recorded.
+// SubmitHandoff sends an authenticated handoff request to the supervisor's auth socket.
+// The supervisor validates the calling tool's token, stamps the source role, checks the
+// transition, and appends an HMAC-signed envelope to the durable log. It is the single
+// entry point the worker/oracle/inspector binaries use, so every handoff is authenticated
+// and legal before it is recorded — and signed by the sole writer.
 func SubmitHandoff(tool string, to Role, status TaskStatus, confirmCurrent, message string) (Handoff, error) {
-	if err := Authenticate(tool); err != nil {
-		return Handoff{}, err
+	token := os.Getenv(tokenEnv)
+	if token == "" {
+		return Handoff{}, fmt.Errorf("%s not set; %s must run with its own credential", tokenEnv, tool)
 	}
-	from := RoleForTool(tool)
-	if err := CheckTransition(from, to); err != nil {
-		return Handoff{}, err
-	}
-	h := Handoff{
-		From:           from,
+	resp, err := dialAndSend(socketRequest{
+		Action:         actionHandoff,
+		Tool:           tool,
+		Token:          token,
 		To:             to,
 		Status:         status,
 		ConfirmCurrent: confirmCurrent,
 		Message:        message,
-	}
-	stored, err := AppendHandoff(h)
+	})
 	if err != nil {
-		return Handoff{}, fmt.Errorf("record handoff: %w", err)
+		return Handoff{}, fmt.Errorf("auth service unavailable: %w", err)
 	}
-	return stored, nil
+	if !resp.OK {
+		if resp.Error != "" {
+			return Handoff{}, errors.New(resp.Error)
+		}
+		return Handoff{}, errors.New("handoff rejected")
+	}
+	if resp.Handoff == nil {
+		return Handoff{}, errors.New("handoff accepted but no record returned")
+	}
+	return *resp.Handoff, nil
 }

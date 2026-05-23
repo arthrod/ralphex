@@ -2,6 +2,9 @@ package agentbus
 
 import (
 	"bufio"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -29,12 +32,54 @@ type Handoff struct {
 	ConfirmCurrent string     `json:"confirm_current,omitempty"`
 	Message        string     `json:"message"`
 	Time           time.Time  `json:"time"`
+	Mac            string     `json:"mac,omitempty"`
+}
+
+// macForHandoff computes the hex-encoded HMAC-SHA256 of the handoff over all fields
+// except the mac itself. The mac field is zeroed before marshaling so signing and
+// verification operate on identical bytes; struct field order is stable so the
+// marshaled form is deterministic.
+func macForHandoff(h Handoff, key []byte) string {
+	h.Mac = ""
+	data, err := json.Marshal(h)
+	if err != nil {
+		// json.Marshal of a Handoff (only basic types) cannot fail; guard defensively.
+		return ""
+	}
+	mac := hmac.New(sha256.New, key)
+	mac.Write(data)
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+// VerifyHandoffMac reports whether h carries a valid HMAC for key. A handoff with a
+// missing or tampered mac fails. The comparison is constant-time.
+func VerifyHandoffMac(h Handoff, key []byte) bool {
+	want := macForHandoff(h, key)
+	return hmac.Equal([]byte(want), []byte(h.Mac))
 }
 
 // AppendHandoff assigns the next sequence number and appends the envelope to
-// handoffs.jsonl under an exclusive lock (read-max-seq then write, atomically with
-// respect to other role processes). It returns the stored record with Seq/Time set.
+// handoffs.jsonl under an exclusive lock. It returns the stored record with Seq/Time
+// set. It writes an UNSIGNED line; the supervisor rejects unsigned lines, so this is
+// only useful in tests that exercise forged-line handling. Production code routes
+// through AppendSignedHandoff.
 func AppendHandoff(h Handoff) (Handoff, error) {
+	return appendHandoffLocked(h, nil)
+}
+
+// AppendSignedHandoff assigns Seq/Time, computes the HMAC over the stamped handoff with
+// key, and appends the signed line under an exclusive lock. The stored line carries the
+// same Seq/Time/Mac that were signed, so a reader can verify the mac and reject any line
+// written directly to the file without the supervisor's in-memory key.
+func AppendSignedHandoff(h Handoff, key []byte) (Handoff, error) {
+	return appendHandoffLocked(h, key)
+}
+
+// appendHandoffLocked is the shared locked-append routine: it opens the log, takes an
+// exclusive lock, assigns the next Seq and a Time, and (when key is non-nil) signs the
+// stamped handoff before writing the JSON line. Seq and Time are assigned BEFORE the mac
+// is computed so the stored line and the signed bytes match exactly.
+func appendHandoffLocked(h Handoff, key []byte) (Handoff, error) {
 	if err := EnsureDir(); err != nil {
 		return h, err
 	}
@@ -58,6 +103,9 @@ func AppendHandoff(h Handoff) (Handoff, error) {
 	h.Seq = maxSeq + 1
 	if h.Time.IsZero() {
 		h.Time = time.Now().UTC()
+	}
+	if key != nil {
+		h.Mac = macForHandoff(h, key)
 	}
 
 	line, err := json.Marshal(h)

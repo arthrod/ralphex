@@ -14,11 +14,14 @@ import (
 // version nibble pinned to 4 and the variant nibble to 8/9/a/b.
 var uuidV4Pattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
 
+// TestGenerateRegistry asserts the in-memory registry mints distinct v4 UUIDs and that
+// no tokens.json file is ever written under the supervisor-owned-socket model.
 func TestGenerateRegistry(t *testing.T) {
 	t.Setenv("AGENTBUS_DIR", t.TempDir())
 
-	reg, err := GenerateRegistry()
+	srv, err := NewAuthServer()
 	require.NoError(t, err)
+	reg := srv.Registry()
 	assert.Len(t, reg, len(AllTools))
 	for _, tool := range AllTools {
 		assert.NotEmpty(t, reg[tool], "token for %s", tool)
@@ -36,18 +39,13 @@ func TestGenerateRegistry(t *testing.T) {
 		assert.Regexp(t, uuidV4Pattern, reg[tool], "token for %s must be a v4 UUID", tool)
 	}
 
-	// registry file is 0o600
-	fi, err := os.Stat(filepath.Join(Dir(), tokensFile))
-	require.NoError(t, err)
-	assert.Equal(t, os.FileMode(0o600), fi.Mode().Perm())
-
-	assert.True(t, RegistryExists())
+	// the registry lives only in memory: there is no tokens.json on disk
+	_, statErr := os.Stat(filepath.Join(Dir(), "tokens.json"))
+	assert.True(t, os.IsNotExist(statErr), "tokens.json must not be written")
 }
 
 func TestAuthenticate(t *testing.T) {
-	t.Setenv("AGENTBUS_DIR", t.TempDir())
-	reg, err := GenerateRegistry()
-	require.NoError(t, err)
+	reg := startTestAuthServer(t).Registry()
 
 	t.Run("correct token passes", func(t *testing.T) {
 		t.Setenv(tokenEnv, reg[ToolWorker])
@@ -76,9 +74,7 @@ func TestAuthenticate(t *testing.T) {
 // rejected by every other tool. This is the "won't work with different tools" property — proven
 // point to point rather than for a single example pair.
 func TestAuthenticatePointToPoint(t *testing.T) {
-	t.Setenv("AGENTBUS_DIR", t.TempDir())
-	reg, err := GenerateRegistry()
-	require.NoError(t, err)
+	reg := startTestAuthServer(t).Registry()
 
 	for _, holder := range AllTools {
 		for _, target := range AllTools {

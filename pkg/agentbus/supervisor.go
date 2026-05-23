@@ -42,14 +42,17 @@ type Supervisor struct {
 	git            Committer
 	healthInterval time.Duration
 	log            Logf
+	macKey         []byte
 }
 
 // NewSupervisor builds a supervisor. A zero healthInterval falls back to the default.
-func NewSupervisor(launcher Launcher, git Committer, healthInterval time.Duration, log Logf) *Supervisor {
+// macKey is the in-memory HMAC key the AuthServer used to sign handoff lines; the
+// supervisor verifies each line against it and rejects any line lacking a valid mac.
+func NewSupervisor(launcher Launcher, git Committer, healthInterval time.Duration, log Logf, macKey []byte) *Supervisor {
 	if healthInterval <= 0 {
 		healthInterval = DefaultHealthInterval
 	}
-	return &Supervisor{launcher: launcher, git: git, healthInterval: healthInterval, log: log}
+	return &Supervisor{launcher: launcher, git: git, healthInterval: healthInterval, log: log, macKey: macKey}
 }
 
 func (s *Supervisor) logf(format string, args ...any) {
@@ -64,10 +67,10 @@ func (s *Supervisor) Watch(ctx context.Context) error {
 	if err := EnsureDir(); err != nil {
 		return err
 	}
-	if err := s.processNew(ctx); err != nil {
-		s.logf("initial handoff processing: %v", err)
-	}
 
+	// register the watcher BEFORE the initial backlog scan so a handoff written during
+	// startup is buffered as an event and reprocessed (processNew is idempotent on seq),
+	// rather than being lost in the gap between scanning and watching.
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		return fmt.Errorf("create watcher: %w", err)
@@ -75,6 +78,10 @@ func (s *Supervisor) Watch(ctx context.Context) error {
 	defer watcher.Close()
 	if err := watcher.Add(Dir()); err != nil {
 		return fmt.Errorf("watch %s: %w", Dir(), err)
+	}
+
+	if err := s.processNew(ctx); err != nil {
+		s.logf("initial handoff processing: %v", err)
 	}
 
 	ticker := time.NewTicker(s.healthInterval)
@@ -118,6 +125,18 @@ func (s *Supervisor) processNew(ctx context.Context) error {
 		return err
 	}
 	for _, h := range pending {
+		// authenticity gate: only the supervisor's in-memory key produces a valid mac, so a
+		// line written directly to the file (e.g. a worker forging an inspector->orchestrator
+		// transition) fails here. treat it as consumed-and-ignored: skip it but advance past it
+		// so it is not reprocessed forever.
+		if !VerifyHandoffMac(h, s.macKey) {
+			s.logf("rejected unsigned/forged handoff seq %d", h.Seq)
+			st.LastSeq = h.Seq
+			if err := SaveState(st); err != nil {
+				return fmt.Errorf("persist skip of handoff seq %d: %w", h.Seq, err)
+			}
+			continue
+		}
 		if err := s.applyHandoff(ctx, &st, h); err != nil {
 			return fmt.Errorf("apply handoff seq %d: %w", h.Seq, err)
 		}

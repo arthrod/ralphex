@@ -8,14 +8,11 @@ import (
 	"strings"
 )
 
-// RoleEnvFromRegistry builds the per-role environment for each tmux session: the role's
-// own tool token (so an agent in that session can only authenticate its own tool) plus
-// AGENTBUS_DIR so the tools resolve the same state directory.
-func RoleEnvFromRegistry() (map[Role][]string, error) {
-	reg, err := LoadRegistry()
-	if err != nil {
-		return nil, err
-	}
+// RoleEnvFromRegistry builds the per-role environment for each tmux session from the
+// in-memory registry: the role's own tool token (so an agent in that session can only
+// authenticate its own tool) plus AGENTBUS_DIR so the tools resolve the same state
+// directory.
+func RoleEnvFromRegistry(reg map[string]string) (map[Role][]string, error) {
 	dir := Dir()
 	env := make(map[Role][]string, len(AllTools))
 	for _, tool := range AllTools {
@@ -48,9 +45,10 @@ func workerPrompt(t Task) string {
 	return b.String()
 }
 
-// AssignAndRun validates a PRD task, records it as current, ensures the tmux sessions
-// exist with per-role credentials, and launches the worker on it against the shared
-// opencode session.
+// AssignAndRun validates a PRD task, records it as current, and launches the worker on
+// it against the shared opencode session. It assumes the supervisor's serve loop has
+// already created the per-role tmux sessions with their credentials, so it does not
+// rebuild role env or recreate sessions.
 func AssignAndRun(ctx context.Context, launcher Launcher, taskID string) error {
 	prd, err := LoadPRD()
 	if err != nil {
@@ -63,14 +61,6 @@ func AssignAndRun(ctx context.Context, launcher Launcher, taskID string) error {
 	err = task.Validate()
 	if err != nil {
 		return err
-	}
-
-	roleEnv, err := RoleEnvFromRegistry()
-	if err != nil {
-		return err
-	}
-	if err = launcher.EnsureSessions(ctx, roleEnv); err != nil {
-		return fmt.Errorf("ensure sessions: %w", err)
 	}
 
 	st, err := LoadState()

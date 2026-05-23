@@ -10,6 +10,17 @@
 // agent may use whatever tools it wants. Role identity is enforced only by which
 // handoff CLI a role can authenticate to (a random per-tool token) and the durable
 // handoff log. Safety comes from checkpoint/rollback, not sandboxing.
+//
+// Because all agents run as the same OS user as the supervisor, file permissions cannot
+// isolate them. Two hardening measures close the resulting leaks: the supervisor holds
+// the token registry and a random HMAC key in memory only (never on disk) and is the
+// sole authority — all token validation and all handoff appends go through a
+// supervisor-owned unix-domain socket (0o600); and every handoff line is HMAC-signed by
+// the supervisor, which verifies the mac on read, so a forged line written directly to
+// handoffs.jsonl without a valid mac is rejected. Residual risk (out of scope): a role's
+// own TOOL_API_KEY is still visible to that role via `tmux show-environment` for its own
+// session, so an agent that can run tmux against a sibling session could read that
+// sibling's key. This layer does not defend against that.
 package agentbus
 
 import (
@@ -31,10 +42,10 @@ var AllTools = []string{ToolWorker, ToolOracle, ToolInspector, ToolOrchestrator}
 
 // File names within the agentbus state directory.
 const (
-	tokensFile   = "tokens.json"
 	handoffsFile = "handoffs.jsonl"
 	stateFile    = "state.json"
 	prdFile      = "prd.yaml"
+	socketFile   = "agentbus.sock"
 )
 
 // Dir returns the agentbus state directory, honoring AGENTBUS_DIR and defaulting to
@@ -54,9 +65,12 @@ func EnsureDir() error {
 	return nil
 }
 
-func tokensPath() string   { return filepath.Join(Dir(), tokensFile) }
 func handoffsPath() string { return filepath.Join(Dir(), handoffsFile) }
 func statePath() string    { return filepath.Join(Dir(), stateFile) }
+func socketPath() string   { return filepath.Join(Dir(), socketFile) }
 
 // PRDPath returns the path to the PRD/task-store file.
 func PRDPath() string { return filepath.Join(Dir(), prdFile) }
+
+// SocketPath returns the path to the supervisor's unix-domain auth socket.
+func SocketPath() string { return socketPath() }

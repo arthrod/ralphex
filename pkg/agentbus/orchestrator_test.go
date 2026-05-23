@@ -10,10 +10,11 @@ import (
 
 func TestRoleEnvFromRegistry(t *testing.T) {
 	t.Setenv("AGENTBUS_DIR", t.TempDir())
-	reg, err := GenerateRegistry()
+	srv, err := NewAuthServer()
 	require.NoError(t, err)
+	reg := srv.Registry()
 
-	env, err := RoleEnvFromRegistry()
+	env, err := RoleEnvFromRegistry(reg)
 	require.NoError(t, err)
 	require.Len(t, env, len(AllTools))
 
@@ -28,8 +29,6 @@ func TestRoleEnvFromRegistry(t *testing.T) {
 
 func TestAssignAndRun(t *testing.T) {
 	t.Setenv("AGENTBUS_DIR", t.TempDir())
-	_, err := GenerateRegistry()
-	require.NoError(t, err)
 	require.NoError(t, AddTask(Task{
 		ID:           "t1",
 		Summary:      "implement feature",
@@ -40,7 +39,8 @@ func TestAssignAndRun(t *testing.T) {
 	launcher := &fakeLauncher{}
 	require.NoError(t, AssignAndRun(context.Background(), launcher, "t1"))
 
-	assert.Equal(t, 1, launcher.ensureCount)
+	// serve owns session creation; assign-and-run must not recreate sessions
+	assert.Equal(t, 0, launcher.ensureCount)
 	require.Len(t, launcher.resumes, 1)
 	assert.Equal(t, RoleWorker, launcher.resumes[0].role)
 	assert.Contains(t, launcher.resumes[0].message, "Task t1: implement feature")
@@ -55,8 +55,6 @@ func TestAssignAndRun(t *testing.T) {
 
 func TestAssignAndRunMissingTask(t *testing.T) {
 	t.Setenv("AGENTBUS_DIR", t.TempDir())
-	_, err := GenerateRegistry()
-	require.NoError(t, err)
 	assert.Error(t, AssignAndRun(context.Background(), &fakeLauncher{}, "nope"))
 }
 
