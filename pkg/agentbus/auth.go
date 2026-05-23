@@ -3,7 +3,6 @@ package agentbus
 import (
 	"crypto/rand"
 	"crypto/subtle"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -11,7 +10,7 @@ import (
 
 // tokenEnv is the environment variable each role's tmux session carries; it holds the
 // token minted for that role's tool only.
-const tokenEnv = "TOOL_API_KEY"
+const tokenEnv = "TOOL_API_KEY" //nolint:gosec // G101: env var name, not a hardcoded credential
 
 // GenerateRegistry mints a random token per tool and writes the registry to tokens.json
 // (0o600). It overwrites any existing registry, so it is called once at supervisor start.
@@ -88,10 +87,15 @@ func Authenticate(tool string) error {
 	return nil
 }
 
+// randomToken mints a per-tool credential as an RFC 4122 version-4 UUID. The UUID is generated
+// from crypto/rand (not a dependency) so each tool's key is a genuine random UUID; isolation
+// comes from the registry mapping, not from any structure in the value.
 func randomToken() (string, error) {
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
 		return "", fmt.Errorf("generate token: %w", err)
 	}
-	return hex.EncodeToString(b), nil
+	b[6] = (b[6] & 0x0f) | 0x40 // version 4
+	b[8] = (b[8] & 0x3f) | 0x80 // variant 10
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16]), nil
 }
