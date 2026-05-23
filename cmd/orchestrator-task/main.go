@@ -28,10 +28,10 @@ type addTaskCmd struct {
 
 func (c *addTaskCmd) Execute([]string) error {
 	if err := agentbus.Authenticate(toolName); err != nil {
-		return err
+		return fmt.Errorf("authenticate: %w", err)
 	}
 	if err := agentbus.AddTask(task(c.ID, c.Summary, c.Instructions, c.MinTests)); err != nil {
-		return err
+		return fmt.Errorf("add task: %w", err)
 	}
 	fmt.Printf("added task %s\n", c.ID)
 	return nil
@@ -46,10 +46,10 @@ type updateTaskCmd struct {
 
 func (c *updateTaskCmd) Execute([]string) error {
 	if err := agentbus.Authenticate(toolName); err != nil {
-		return err
+		return fmt.Errorf("authenticate: %w", err)
 	}
 	if err := agentbus.UpdateTask(task(c.ID, c.Summary, c.Instructions, c.MinTests)); err != nil {
-		return err
+		return fmt.Errorf("update task: %w", err)
 	}
 	fmt.Printf("updated task %s\n", c.ID)
 	return nil
@@ -61,10 +61,10 @@ type removeTaskCmd struct {
 
 func (c *removeTaskCmd) Execute([]string) error {
 	if err := agentbus.Authenticate(toolName); err != nil {
-		return err
+		return fmt.Errorf("authenticate: %w", err)
 	}
 	if err := agentbus.RemoveTask(c.ID); err != nil {
-		return err
+		return fmt.Errorf("remove task: %w", err)
 	}
 	fmt.Printf("removed task %s\n", c.ID)
 	return nil
@@ -76,10 +76,10 @@ type assignCmd struct {
 
 func (c *assignCmd) Execute([]string) error {
 	if err := agentbus.Authenticate(toolName); err != nil {
-		return err
+		return fmt.Errorf("authenticate: %w", err)
 	}
 	if err := agentbus.AssignAndRun(context.Background(), agentbus.NewTmuxLauncher(), c.ID); err != nil {
-		return err
+		return fmt.Errorf("assign and run: %w", err)
 	}
 	fmt.Printf("assigned and launched task %s on the worker\n", c.ID)
 	return nil
@@ -91,10 +91,10 @@ type rollbackCmd struct {
 
 func (c *rollbackCmd) Execute([]string) error {
 	if err := agentbus.Authenticate(toolName); err != nil {
-		return err
+		return fmt.Errorf("authenticate: %w", err)
 	}
 	if err := agentbus.NewGit(agentbus.RepoRoot()).RollbackTo(context.Background(), c.To); err != nil {
-		return err
+		return fmt.Errorf("rollback: %w", err)
 	}
 	fmt.Printf("rolled back to %s\n", c.To)
 	return nil
@@ -107,7 +107,7 @@ type serveCmd struct {
 func (c *serveCmd) Execute([]string) error {
 	if !agentbus.RegistryExists() {
 		if _, gerr := agentbus.GenerateRegistry(); gerr != nil {
-			return gerr
+			return fmt.Errorf("generate registry: %w", gerr)
 		}
 		fmt.Println("generated token registry")
 	}
@@ -115,19 +115,19 @@ func (c *serveCmd) Execute([]string) error {
 	launcher := agentbus.NewTmuxLauncher()
 	roleEnv, err := agentbus.RoleEnvFromRegistry()
 	if err != nil {
-		return err
+		return fmt.Errorf("build role env: %w", err)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	if err := launcher.EnsureSessions(ctx, roleEnv); err != nil {
-		return err
+		return fmt.Errorf("ensure sessions: %w", err)
 	}
 
 	sup := agentbus.NewSupervisor(launcher, agentbus.NewGit(agentbus.RepoRoot()), c.HealthInterval,
 		func(format string, args ...any) { fmt.Fprintf(os.Stderr, "[supervisor] "+format+"\n", args...) })
 	fmt.Printf("supervisor watching %s (health every %s)\n", agentbus.Dir(), c.HealthInterval)
 	if err := sup.Watch(ctx); err != nil && !errors.Is(err, context.Canceled) {
-		return err
+		return fmt.Errorf("supervisor watch: %w", err)
 	}
 	return nil
 }

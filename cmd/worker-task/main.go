@@ -23,7 +23,7 @@ type noFurtherActionsCmd struct {
 func (c *noFurtherActionsCmd) Execute([]string) error {
 	h, err := agentbus.SubmitHandoff(toolName, agentbus.RoleInspector, agentbus.StatusUnset, c.ConfirmCurrent, c.Handoff)
 	if err != nil {
-		return err
+		return fmt.Errorf("submit handoff: %w", err)
 	}
 	fmt.Printf("handed off to inspector (seq %d)\n", h.Seq)
 	return nil
@@ -36,7 +36,7 @@ type askOracleCmd struct {
 func (c *askOracleCmd) Execute([]string) error {
 	h, err := agentbus.SubmitHandoff(toolName, agentbus.RoleOracle, agentbus.StatusUnset, "", c.Handoff)
 	if err != nil {
-		return err
+		return fmt.Errorf("submit handoff: %w", err)
 	}
 	fmt.Printf("asked oracle (seq %d)\n", h.Seq)
 	return nil
@@ -46,11 +46,11 @@ type restateCurrentCmd struct{}
 
 func (c *restateCurrentCmd) Execute([]string) error {
 	if err := agentbus.Authenticate(toolName); err != nil {
-		return err
+		return fmt.Errorf("authenticate: %w", err)
 	}
 	task, err := agentbus.CurrentTask()
 	if err != nil {
-		return err
+		return fmt.Errorf("current task: %w", err)
 	}
 	fmt.Printf("Task %s: %s\n\nInstructions:\n%s\n\nMinimum tests:\n", task.ID, task.Summary, task.Instructions)
 	for _, mt := range task.MinTests {

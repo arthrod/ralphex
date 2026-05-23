@@ -3,6 +3,7 @@ package agentbus
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -130,7 +131,7 @@ func TestKillPane(t *testing.T) {
 		require.NoError(t, l.KillPane(context.Background(), RoleWorker))
 		var sentInterrupt bool
 		for _, c := range recorded {
-			if firstArg(c.args) == "send-keys" && contains(c.args, "C-c") {
+			if firstArg(c.args) == "send-keys" && slices.Contains(c.args, "C-c") {
 				sentInterrupt = true
 			}
 		}
@@ -154,7 +155,7 @@ func TestSendHealth(t *testing.T) {
 	require.NoError(t, l.SendHealth(context.Background(), RoleOracle, "ping"))
 	var sent bool
 	for _, c := range recorded {
-		if firstArg(c.args) == "send-keys" && contains(c.args, "ping") {
+		if firstArg(c.args) == "send-keys" && slices.Contains(c.args, "ping") {
 			sent = true
 		}
 	}
@@ -195,13 +196,4 @@ func firstArg(args []string) string {
 		return ""
 	}
 	return args[0]
-}
-
-func contains(ss []string, want string) bool {
-	for _, s := range ss {
-		if s == want {
-			return true
-		}
-	}
-	return false
 }

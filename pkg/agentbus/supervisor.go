@@ -84,7 +84,7 @@ func (s *Supervisor) Watch(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return fmt.Errorf("supervisor stopped: %w", ctx.Err())
 		case ev, ok := <-watcher.Events:
 			if !ok {
 				return nil

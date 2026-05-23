@@ -2,6 +2,7 @@ package agentbus
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -59,7 +60,8 @@ func AssignAndRun(ctx context.Context, launcher Launcher, taskID string) error {
 	if !ok {
 		return fmt.Errorf("task %q not found", taskID)
 	}
-	if err := task.Validate(); err != nil {
+	err = task.Validate()
+	if err != nil {
 		return err
 	}
 
@@ -67,8 +69,8 @@ func AssignAndRun(ctx context.Context, launcher Launcher, taskID string) error {
 	if err != nil {
 		return err
 	}
-	if err := launcher.EnsureSessions(ctx, roleEnv); err != nil {
-		return err
+	if err = launcher.EnsureSessions(ctx, roleEnv); err != nil {
+		return fmt.Errorf("ensure sessions: %w", err)
 	}
 
 	st, err := LoadState()
@@ -93,7 +95,7 @@ func CurrentTask() (Task, error) {
 		return Task{}, err
 	}
 	if st.CurrentTaskID == "" {
-		return Task{}, fmt.Errorf("no current task assigned")
+		return Task{}, errors.New("no current task assigned")
 	}
 	prd, err := LoadPRD()
 	if err != nil {

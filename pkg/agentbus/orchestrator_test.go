@@ -2,7 +2,6 @@ package agentbus
 
 import (
 	"context"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -65,7 +64,7 @@ func TestCurrentTask(t *testing.T) {
 	t.Setenv("AGENTBUS_DIR", t.TempDir())
 
 	_, err := CurrentTask()
-	assert.Error(t, err, "no task assigned yet")
+	require.Error(t, err, "no task assigned yet")
 
 	require.NoError(t, AddTask(Task{
 		ID:           "t1",
@@ -94,5 +93,5 @@ func TestWorkerPrompt(t *testing.T) {
 	assert.Contains(t, p, "Task t9: do x")
 	assert.Contains(t, p, "instructions here")
 	assert.Contains(t, p, "- make test")
-	assert.True(t, strings.Contains(p, "no_further_actions"))
+	assert.Contains(t, p, "no_further_actions")
 }

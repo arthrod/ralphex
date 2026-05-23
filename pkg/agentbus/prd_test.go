@@ -55,7 +55,7 @@ func TestPRDRoundTrip(t *testing.T) {
 	require.NoError(t, AddTask(t2))
 
 	// duplicate id rejected
-	assert.Error(t, AddTask(validTask()))
+	require.Error(t, AddTask(validTask()))
 
 	prd, err := LoadPRD()
 	require.NoError(t, err)
@@ -72,7 +72,7 @@ func TestPRDRoundTrip(t *testing.T) {
 	// update missing fails
 	missing := validTask()
 	missing.ID = "nope"
-	assert.Error(t, UpdateTask(missing))
+	require.Error(t, UpdateTask(missing))
 
 	// remove
 	require.NoError(t, RemoveTask("t1"))

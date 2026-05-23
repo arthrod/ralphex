@@ -35,7 +35,7 @@ func (c *toOracleCmd) Execute([]string) error {
 func submit(to agentbus.Role, status agentbus.TaskStatus, message, label string) error {
 	h, err := agentbus.SubmitHandoff(toolName, to, status, "", message)
 	if err != nil {
-		return err
+		return fmt.Errorf("submit handoff: %w", err)
 	}
 	fmt.Printf("handed off to %s (seq %d)\n", label, h.Seq)
 	return nil

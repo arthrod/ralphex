@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os/exec"
 	"sort"
@@ -53,7 +54,8 @@ func (l *TmuxLauncher) EnsureSessions(ctx context.Context, roleEnv map[Role][]st
 		if _, err := l.run(ctx, nil, l.tmuxBin, "has-session", "-t", name); err == nil {
 			continue // already exists
 		}
-		args := []string{"new-session", "-d", "-s", name}
+		args := make([]string, 0, 4+2*len(roleEnv[r]))
+		args = append(args, "new-session", "-d", "-s", name)
 		for _, kv := range roleEnv[r] {
 			args = append(args, "-e", kv)
 		}
@@ -70,7 +72,7 @@ func (l *TmuxLauncher) EnsureSessions(ctx context.Context, roleEnv map[Role][]st
 func (l *TmuxLauncher) KillPane(ctx context.Context, r Role) error {
 	name := sessionName(r)
 	if _, err := l.run(ctx, nil, l.tmuxBin, "has-session", "-t", name); err != nil {
-		return nil
+		return nil //nolint:nilerr // missing session means nothing to kill; the durable handoff log, not the kill, is the source of truth
 	}
 	_, _ = l.run(ctx, nil, l.tmuxBin, "send-keys", "-t", name, "C-c")
 	return nil
@@ -101,7 +103,7 @@ func (l *TmuxLauncher) Resume(ctx context.Context, r Role, sessionID, message st
 func (l *TmuxLauncher) SendHealth(ctx context.Context, r Role, message string) error {
 	name := sessionName(r)
 	if _, err := l.run(ctx, nil, l.tmuxBin, "has-session", "-t", name); err != nil {
-		return nil
+		return nil //nolint:nilerr // no active session means there is nothing to health-check; treated as a benign no-op
 	}
 	_, err := l.run(ctx, nil, l.tmuxBin, "send-keys", "-t", name, message, "Enter")
 	return err
@@ -122,7 +124,7 @@ func (l *TmuxLauncher) discoverLatestSession(ctx context.Context) (string, error
 		return "", fmt.Errorf("parse session list: %w", err)
 	}
 	if len(sessions) == 0 {
-		return "", fmt.Errorf("no opencode sessions found after launch")
+		return "", errors.New("no opencode sessions found after launch")
 	}
 	sort.Slice(sessions, func(i, j int) bool {
 		if sessions[i].Updated != sessions[j].Updated {

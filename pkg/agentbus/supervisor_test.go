@@ -146,7 +146,7 @@ func TestSupervisorResumeFailureRetries(t *testing.T) {
 	sup := NewSupervisor(launcher, &fakeCommitter{}, 0, nil)
 
 	// first attempt fails; LastSeq must not advance so the record is retried
-	assert.Error(t, sup.processNew(context.Background()))
+	require.Error(t, sup.processNew(context.Background()))
 	st, err := LoadState()
 	require.NoError(t, err)
 	assert.Equal(t, 0, st.LastSeq)
@@ -167,7 +167,7 @@ func TestSupervisorRejectsBadTransition(t *testing.T) {
 
 	launcher := &fakeLauncher{}
 	sup := NewSupervisor(launcher, &fakeCommitter{}, 0, nil)
-	assert.Error(t, sup.processNew(context.Background()))
+	require.Error(t, sup.processNew(context.Background()))
 	assert.Empty(t, launcher.resumes)
 }
 

@@ -3,6 +3,7 @@ package agentbus
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -73,7 +74,7 @@ func (g *Git) CheckpointAll(ctx context.Context, msg string) (hash string, commi
 // is only invoked by the orchestrator (never by a worker/oracle/inspector handoff).
 func (g *Git) RollbackTo(ctx context.Context, ref string) error {
 	if strings.TrimSpace(ref) == "" {
-		return fmt.Errorf("rollback ref is required")
+		return errors.New("rollback ref is required")
 	}
 	_, err := g.run(ctx, "reset", "--hard", ref)
 	return err

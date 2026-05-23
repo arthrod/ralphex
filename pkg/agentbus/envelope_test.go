@@ -45,13 +45,11 @@ func TestAppendHandoffConcurrent(t *testing.T) {
 	const n = 25
 	var wg sync.WaitGroup
 	errs := make(chan error, n)
-	for i := 0; i < n; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range n {
+		wg.Go(func() {
 			_, err := AppendHandoff(Handoff{From: RoleOracle, To: RoleWorker, Message: "go"})
 			errs <- err
-		}()
+		})
 	}
 	wg.Wait()
 	close(errs)

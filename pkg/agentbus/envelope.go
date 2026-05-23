@@ -39,13 +39,14 @@ func AppendHandoff(h Handoff) (Handoff, error) {
 		return h, err
 	}
 	path := handoffsPath()
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_RDWR, 0o600)
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_RDWR, 0o600) //nolint:gosec // G304: path built from trusted internal config, not user input
 	if err != nil {
 		return h, fmt.Errorf("open handoffs log: %w", err)
 	}
 	defer f.Close()
 
-	if err := lockFile(f); err != nil {
+	err = lockFile(f)
+	if err != nil {
 		return h, err
 	}
 	defer func() { _ = unlockFile(f) }()

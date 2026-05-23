@@ -13,6 +13,7 @@
 package agentbus
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 )
@@ -47,7 +48,10 @@ func Dir() string {
 
 // EnsureDir creates the state directory (0o700) if it does not exist.
 func EnsureDir() error {
-	return os.MkdirAll(Dir(), 0o700)
+	if err := os.MkdirAll(Dir(), 0o700); err != nil {
+		return fmt.Errorf("create state dir: %w", err)
+	}
+	return nil
 }
 
 func tokensPath() string   { return filepath.Join(Dir(), tokensFile) }
